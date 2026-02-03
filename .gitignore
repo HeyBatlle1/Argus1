@@ -1,0 +1,33 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Secrets (should NEVER be committed)
+*.key
+*.pem
+*.p12
+secrets/
+
+# Test artifacts
+*.log
+coverage/
+
+# Cargo lock is committed for binaries
+# (uncomment if this becomes a library)
+# Cargo.lock
