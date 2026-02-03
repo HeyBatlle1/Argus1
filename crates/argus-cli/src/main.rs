@@ -35,7 +35,7 @@ const ARGUS_THINKING: &str = r#"
      ◎ ◎ ◎ ◎ ◎
     ◎ ◎ ◎ ◎ ◎ ◎
    ◎ ╭─────────╮ ◎
-  ◎ ╭│  ◉   ◉  │╮ ◎
+  ◎ ╭│  ⊛   ⊛  │╮ ◎
  ◎ ◎│   ╲ ─ ╱   │◎ ◎
   ◎ │  ──┼≡┼──  │ ◎
    ◎╰──╱     ╲──╯◎
@@ -43,6 +43,32 @@ const ARGUS_THINKING: &str = r#"
      ◎ ◎ ◎ ◎ ◎ ◎
    ════════════════
      PROCESSING"#;
+
+const ARGUS_ALERT: &str = r#"
+     ⊙ ⊙ ⊙ ⊙ ⊙
+    ⊙ ⊙ ⊙ ⊙ ⊙ ⊙
+   ⊙ ╭─────────╮ ⊙
+  ⊙ ╭│  ⊚   ⊚  │╮ ⊙
+ ⊙ ⊙│   ╲ ! ╱   │⊙ ⊙
+  ⊙ │  ══┼═┼══  │ ⊙
+   ⊙╰──╱     ╲──╯⊙
+    ⊙ ╱ ⊙ ⊙ ⊙ ╲ ⊙
+     ⊙ ⊙ ⊙ ⊙ ⊙ ⊙
+   ════════════════
+    ⚠ TOOL ACTIVE"#;
+
+const ARGUS_SUCCESS: &str = r#"
+     ✦ ✦ ✦ ✦ ✦
+    ✦ ✦ ✦ ✦ ✦ ✦
+   ✦ ╭─────────╮ ✦
+  ✦ ╭│  ◉   ◉  │╮ ✦
+ ✦ ✦│   ╲ ◡ ╱   │✦ ✦
+  ✦ │  ──┼─┼──  │ ✦
+   ✦╰──╱     ╲──╯✦
+    ✦ ╱ ✦ ✦ ✦ ╲ ✦
+     ✦ ✦ ✦ ✦ ✦ ✦
+   ════════════════
+     ✓ COMPLETE"#;
 
 const LOGO: &str = r#"
     ___    ____  ______  __  _______
@@ -81,6 +107,14 @@ fn vault_path() -> PathBuf {
     dirs::home_dir().unwrap().join(".argus").join("vault.enc")
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum ArgusState {
+    Watching,
+    Thinking,
+    ToolActive,
+    Success,
+}
+
 struct ChatMessage {
     role: String,
     content: String,
@@ -92,7 +126,7 @@ struct App {
     scroll: u16,
     api_key: String,
     client: reqwest::Client,
-    thinking: bool,
+    state: ArgusState,
 }
 
 impl App {
@@ -103,7 +137,7 @@ impl App {
             scroll: 0,
             api_key,
             client: reqwest::Client::new(),
-            thinking: false,
+            state: ArgusState::Watching,
         }
     }
 
@@ -145,6 +179,79 @@ impl App {
                     Err(e) => format!("Error writing file: {}", e),
                 }
             }
+            "shell" => {
+                let command = args["command"].as_str().unwrap_or("");
+                // Safety: limit dangerous commands
+                let dangerous = ["rm -rf /", "sudo", "mkfs", "dd if=", "> /dev/"];
+                if dangerous.iter().any(|d| command.contains(d)) {
+                    return "⛔ Command blocked for safety".to_string();
+                }
+                match std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(command)
+                    .output()
+                {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        if output.status.success() {
+                            if stdout.len() > 2000 {
+                                format!("{}...\n[truncated]", &stdout[..2000])
+                            } else {
+                                stdout.to_string()
+                            }
+                        } else {
+                            format!("Exit {}: {}", output.status.code().unwrap_or(-1), stderr)
+                        }
+                    }
+                    Err(e) => format!("Error executing: {}", e),
+                }
+            }
+            "web_search" => {
+                let query = args["query"].as_str().unwrap_or("");
+                // Use DuckDuckGo HTML (no API key needed)
+                let url = format!(
+                    "https://html.duckduckgo.com/html/?q={}",
+                    urlencoding::encode(query)
+                );
+                match reqwest::get(&url).await {
+                    Ok(resp) => {
+                        match resp.text().await {
+                            Ok(html) => {
+                                // Extract result snippets (basic parsing)
+                                let mut results = Vec::new();
+                                for (i, chunk) in html.split("result__snippet").enumerate() {
+                                    if i == 0 || i > 5 { continue; }
+                                    // Get text between > and <
+                                    if let Some(start) = chunk.find('>') {
+                                        if let Some(end) = chunk[start..].find('<') {
+                                            let snippet = &chunk[start+1..start+end];
+                                            let clean: String = snippet
+                                                .replace("&quot;", "\"")
+                                                .replace("&amp;", "&")
+                                                .replace("&lt;", "<")
+                                                .replace("&gt;", ">")
+                                                .chars()
+                                                .filter(|c| !c.is_control())
+                                                .collect();
+                                            if clean.len() > 20 {
+                                                results.push(format!("• {}", clean.trim()));
+                                            }
+                                        }
+                                    }
+                                }
+                                if results.is_empty() {
+                                    "No results found".to_string()
+                                } else {
+                                    results.join("\n\n")
+                                }
+                            }
+                            Err(e) => format!("Error reading response: {}", e),
+                        }
+                    }
+                    Err(e) => format!("Error searching: {}", e),
+                }
+            }
             _ => format!("Unknown tool: {}", name),
         }
     }
@@ -160,7 +267,7 @@ impl App {
             content: user_msg.clone(),
         });
         self.input.clear();
-        self.thinking = true;
+        self.state = ArgusState::Thinking;
 
         let tools = serde_json::json!([
             {
@@ -217,6 +324,40 @@ impl App {
                         "required": ["path", "content"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "shell",
+                    "description": "Execute a shell command and return output. Use for system tasks.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "The shell command to execute"
+                            }
+                        },
+                        "required": ["command"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search the web using DuckDuckGo. Returns top results.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
             }
         ]);
 
@@ -242,6 +383,7 @@ impl App {
                     tool_call["function"]["arguments"].as_str().unwrap_or("{}")
                 ).unwrap_or(serde_json::json!({}));
                 
+                self.state = ArgusState::ToolActive;
                 let result = self.execute_tool(name, &args).await;
                 
                 self.messages.push(ChatMessage {
@@ -249,6 +391,7 @@ impl App {
                     content: format!("🔧 Tool: {}\n📤 Result:\n{}", name, result),
                 });
             }
+            self.state = ArgusState::Success;
         } else {
             let content = json["choices"][0]["message"]["content"]
                 .as_str()
@@ -259,8 +402,9 @@ impl App {
                 role: "Argus".to_string(),
                 content,
             });
+            self.state = ArgusState::Success;
         }
-        self.thinking = false;
+        // State will reset to Watching on next input
 
         Ok(())
     }
@@ -286,17 +430,19 @@ async fn run_tui(api_key: String) -> anyhow::Result<()> {
                 .split(f.size());
 
             // Left side - Argus avatar
-            let avatar = if app.thinking { ARGUS_THINKING } else { ARGUS_WATCHING };
+            let (avatar, avatar_color, status_text) = match app.state {
+                ArgusState::Watching => (ARGUS_WATCHING, Color::Cyan, " Watching "),
+                ArgusState::Thinking => (ARGUS_THINKING, Color::Yellow, " Thinking... "),
+                ArgusState::ToolActive => (ARGUS_ALERT, Color::Magenta, " Tool Active "),
+                ArgusState::Success => (ARGUS_SUCCESS, Color::Green, " Complete "),
+            };
             let avatar_widget = Paragraph::new(avatar)
-                .style(Style::default().fg(Color::Cyan))
+                .style(Style::default().fg(avatar_color))
                 .alignment(Alignment::Center)
                 .block(Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::DarkGray))
-                    .title(Span::styled(
-                        if app.thinking { " Thinking... " } else { " Watching " },
-                        Style::default().fg(if app.thinking { Color::Yellow } else { Color::Cyan })
-                    )));
+                    .title(Span::styled(status_text, Style::default().fg(avatar_color))));
             f.render_widget(avatar_widget, main_chunks[0]);
 
             // Right side - chat
@@ -352,7 +498,8 @@ async fn run_tui(api_key: String) -> anyhow::Result<()> {
             f.render_widget(chat, chat_chunks[1]);
 
             // Input - always visible
-            let input_style = if app.thinking {
+            let is_busy = matches!(app.state, ArgusState::Thinking | ArgusState::ToolActive);
+            let input_style = if is_busy {
                 Style::default().fg(Color::DarkGray)
             } else {
                 Style::default().fg(Color::White)
@@ -361,10 +508,10 @@ async fn run_tui(api_key: String) -> anyhow::Result<()> {
                 .style(input_style)
                 .block(Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(if app.thinking { Color::DarkGray } else { Color::Cyan }))
+                    .border_style(Style::default().fg(if is_busy { Color::DarkGray } else { Color::Cyan }))
                     .title(Span::styled(
-                        if app.thinking { " Wait... " } else { " Message " },
-                        Style::default().fg(if app.thinking { Color::Yellow } else { Color::Cyan })
+                        if is_busy { " Wait... " } else { " Message " },
+                        Style::default().fg(if is_busy { Color::Yellow } else { Color::Cyan })
                     )));
             f.render_widget(input, chat_chunks[2]);
 
@@ -386,9 +533,11 @@ async fn run_tui(api_key: String) -> anyhow::Result<()> {
 
         if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
-                if app.thinking {
-                    continue; // Ignore input while thinking
+                if matches!(app.state, ArgusState::Thinking | ArgusState::ToolActive) {
+                    continue; // Ignore input while busy
                 }
+                // Reset to watching when user starts typing
+                app.state = ArgusState::Watching;
                 match key.code {
                     KeyCode::Esc => break,
                     KeyCode::Enter => {
