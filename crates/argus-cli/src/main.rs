@@ -19,26 +19,30 @@ use std::path::PathBuf;
 use argus_crypto::SecureVault;
 
 const ARGUS_WATCHING: &str = r#"
-        ◯ ◯ ◯
-       ◯ ◯ ◯ ◯
-      ◯  ___  ◯
-     ◯  /   \  ◯
-    ◯  | ◉ ◉ |  ◯
-     ◯  \ ▽ /  ◯
-      ◯  |═|  ◯
-       ◯/|||\ ◯
-        ◯ ◯ ◯"#;
+     ◉ ◉ ◉ ◉ ◉
+    ◉ ◉ ◉ ◉ ◉ ◉
+   ◉ ╭─────────╮ ◉
+  ◉ ╭│  ◉   ◉  │╮ ◉
+ ◉ ◉│   ╲ ▽ ╱   │◉ ◉
+  ◉ │  ──┼─┼──  │ ◉
+   ◉╰──╱     ╲──╯◉
+    ◉ ╱ ◉ ◉ ◉ ╲ ◉
+     ◉ ◉ ◉ ◉ ◉ ◉
+   ════════════════
+    ALL EYES OPEN"#;
 
 const ARGUS_THINKING: &str = r#"
-        ◯ ◯ ◯
-       ◯ ◯ ◯ ◯
-      ◯  ___  ◯
-     ◯  /   \  ◯
-    ◯  | ◉ ◉ |  ◯
-     ◯  \ ─ /  ◯
-      ◯  |≡|  ◯
-       ◯/|||\◯
-        ◯ ◯ ◯"#;
+     ◎ ◎ ◎ ◎ ◎
+    ◎ ◎ ◎ ◎ ◎ ◎
+   ◎ ╭─────────╮ ◎
+  ◎ ╭│  ◉   ◉  │╮ ◎
+ ◎ ◎│   ╲ ─ ╱   │◎ ◎
+  ◎ │  ──┼≡┼──  │ ◎
+   ◎╰──╱     ╲──╯◎
+    ◎ ╱ ◎ ◎ ◎ ╲ ◎
+     ◎ ◎ ◎ ◎ ◎ ◎
+   ════════════════
+     PROCESSING"#;
 
 const LOGO: &str = r#"
     ___    ____  ______  __  _______
@@ -103,6 +107,48 @@ impl App {
         }
     }
 
+    async fn execute_tool(&self, name: &str, args: &serde_json::Value) -> String {
+        match name {
+            "read_file" => {
+                let path = args["path"].as_str().unwrap_or("");
+                match std::fs::read_to_string(path) {
+                    Ok(content) => {
+                        if content.len() > 2000 {
+                            format!("{}...\n[truncated, {} bytes total]", &content[..2000], content.len())
+                        } else {
+                            content
+                        }
+                    }
+                    Err(e) => format!("Error reading file: {}", e),
+                }
+            }
+            "list_directory" => {
+                let path = args["path"].as_str().unwrap_or(".");
+                match std::fs::read_dir(path) {
+                    Ok(entries) => {
+                        let mut result = String::new();
+                        for entry in entries.flatten() {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                            result.push_str(&format!("{}{}\n", if is_dir { "📁 " } else { "📄 " }, name));
+                        }
+                        result
+                    }
+                    Err(e) => format!("Error listing directory: {}", e),
+                }
+            }
+            "write_file" => {
+                let path = args["path"].as_str().unwrap_or("");
+                let content = args["content"].as_str().unwrap_or("");
+                match std::fs::write(path, content) {
+                    Ok(_) => format!("✅ Written {} bytes to {}", content.len(), path),
+                    Err(e) => format!("Error writing file: {}", e),
+                }
+            }
+            _ => format!("Unknown tool: {}", name),
+        }
+    }
+
     async fn send_message(&mut self) -> anyhow::Result<()> {
         if self.input.trim().is_empty() {
             return Ok(());
@@ -116,27 +162,104 @@ impl App {
         self.input.clear();
         self.thinking = true;
 
+        let tools = serde_json::json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read the contents of a file from the filesystem",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "The path to the file to read"
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_directory",
+                    "description": "List files and directories in a given path",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "The directory path to list"
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "description": "Write content to a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "The path to write to"
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "The content to write"
+                            }
+                        },
+                        "required": ["path", "content"]
+                    }
+                }
+            }
+        ]);
+
         let resp = self.client
             .post("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
                 "model": "arcee-ai/trinity-mini:free",
-                "messages": [{"role": "user", "content": user_msg}]
+                "messages": [{"role": "user", "content": user_msg}],
+                "tools": tools
             }))
             .send()
             .await?;
 
         let json: serde_json::Value = resp.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("Error: No response")
-            .to_string();
+        
+        // Check for tool calls
+        if let Some(tool_calls) = json["choices"][0]["message"]["tool_calls"].as_array() {
+            for tool_call in tool_calls {
+                let name = tool_call["function"]["name"].as_str().unwrap_or("");
+                let args: serde_json::Value = serde_json::from_str(
+                    tool_call["function"]["arguments"].as_str().unwrap_or("{}")
+                ).unwrap_or(serde_json::json!({}));
+                
+                let result = self.execute_tool(name, &args).await;
+                
+                self.messages.push(ChatMessage {
+                    role: "Argus".to_string(),
+                    content: format!("🔧 Tool: {}\n📤 Result:\n{}", name, result),
+                });
+            }
+        } else {
+            let content = json["choices"][0]["message"]["content"]
+                .as_str()
+                .unwrap_or("Error: No response")
+                .to_string();
 
-        self.messages.push(ChatMessage {
-            role: "Argus".to_string(),
-            content,
-        });
+            self.messages.push(ChatMessage {
+                role: "Argus".to_string(),
+                content,
+            });
+        }
         self.thinking = false;
 
         Ok(())
