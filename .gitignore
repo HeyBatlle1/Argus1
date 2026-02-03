@@ -1,6 +1,7 @@
-# Build artifacts
+# Rust
 /target/
 **/*.rs.bk
+Cargo.lock
 
 # IDE
 .idea/
@@ -18,16 +19,10 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# Secrets (should NEVER be committed)
-*.key
+# Secrets (though we don't store them in plaintext like some people)
 *.pem
-*.p12
+*.key
 secrets/
 
-# Test artifacts
+# Build artifacts
 *.log
-coverage/
-
-# Cargo lock is committed for binaries
-# (uncomment if this becomes a library)
-# Cargo.lock

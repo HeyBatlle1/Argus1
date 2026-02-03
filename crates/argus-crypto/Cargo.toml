@@ -1,0 +1,30 @@
+[package]
+name = "argus-crypto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Post-quantum cryptography layer for Argus"
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+# Post-quantum crypto
+pqcrypto-kyber.workspace = true
+pqcrypto-dilithium.workspace = true
+pqcrypto-sphincsplus.workspace = true
+
+# Classical crypto (hybrid schemes)
+ring.workspace = true
+chacha20poly1305.workspace = true
+
+# Hardware keychain
+keyring.workspace = true
+
+# Secure memory
+secrecy.workspace = true
+zeroize.workspace = true

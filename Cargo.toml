@@ -1,71 +1,74 @@
 [workspace]
 resolver = "2"
 members = [
-    "argus-core",
-    "argus-crypto",
-    "argus-sandbox",
-    "argus-memory",
-    "argus-cli",
+    "crates/argus-core",
+    "crates/argus-crypto",
+    "crates/argus-sandbox",
+    "crates/argus-memory",
+    "crates/argus-cli",
 ]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+authors = ["HeyBattle1"]
 license = "MIT"
-repository = "https://github.com/burtonstuff/argus"
-authors = ["Burton <bradlee@proton.me>"]
+repository = "https://github.com/HeyBattle1/argus"
+description = "Quantum-hardened, security-first AI agent runtime"
+readme = "README.md"
+keywords = ["ai", "agent", "security", "quantum", "llm"]
+categories = ["command-line-utilities", "cryptography", "development-tools"]
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.35", features = ["full"] }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # Error handling
-thiserror = "2"
-anyhow = "1"
+thiserror = "1.0"
+anyhow = "1.0"
 
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Post-quantum crypto
-pqcrypto-mlkem = "0.1"
-pqcrypto-mldsa = "0.1"
+# CLI
+clap = { version = "4.4", features = ["derive"] }
 
-# Standard crypto (for hybrid schemes)
+# TUI
+ratatui = "0.25"
+crossterm = "0.27"
+
+# HTTP client (for LLM APIs)
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+
+# Post-quantum crypto
+pqcrypto-kyber = "0.8"      # ML-KEM
+pqcrypto-dilithium = "0.5"  # ML-DSA
+pqcrypto-sphincsplus = "0.7" # SLH-DSA
+
+# Classical crypto (for hybrid schemes)
 ring = "0.17"
 chacha20poly1305 = "0.10"
 
-# WebAssembly sandbox
-wasmtime = "28"
+# Hardware keychain
+keyring = "2.3"
 
-# CLI
-clap = { version = "4", features = ["derive"] }
-
-# TUI (optional)
-ratatui = "0.29"
-crossterm = "0.28"
+# WASM sandbox
+wasmtime = "16.0"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "json", "uuid"] }
-
-# HTTP client
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-
-# Keychain integration
-keyring = "3"
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "uuid", "chrono"] }
 
 # UUID
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
-[profile.release]
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
+# Secure memory handling
+secrecy = "0.8"
+zeroize = { version = "1.7", features = ["derive"] }
