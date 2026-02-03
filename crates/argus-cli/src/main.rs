@@ -19,56 +19,76 @@ use std::path::PathBuf;
 use argus_crypto::SecureVault;
 
 const ARGUS_WATCHING: &str = r#"
-     ◉ ◉ ◉ ◉ ◉
-    ◉ ◉ ◉ ◉ ◉ ◉
-   ◉ ╭─────────╮ ◉
-  ◉ ╭│  ◉   ◉  │╮ ◉
- ◉ ◉│   ╲ ▽ ╱   │◉ ◉
-  ◉ │  ──┼─┼──  │ ◉
-   ◉╰──╱     ╲──╯◉
-    ◉ ╱ ◉ ◉ ◉ ╲ ◉
-     ◉ ◉ ◉ ◉ ◉ ◉
-   ════════════════
-    ALL EYES OPEN"#;
+        ╭──◉──╮
+       ╭┤◉ ◉ ◉├╮
+      ◉│ ╭───╮ │◉
+      ◉│ │◉ ◉│ │◉
+      ◉│ │ ▽ │ │◉
+       │ ╰───╯ │
+    ◉──┤ ◉ ◉ ◉ ├──◉
+   ╭───┤       ├───╮
+   │◉◉◉│ ◉ ◉ ◉ │◉◉◉│
+   ╰───┤       ├───╯
+       │ ◉   ◉ │
+       ╰┬─┴─┬─╯
+        │   │
+       ─┴─ ─┴─
+   ═══════════════
+    👁 ALL EYES OPEN"#;
 
 const ARGUS_THINKING: &str = r#"
-     ◎ ◎ ◎ ◎ ◎
-    ◎ ◎ ◎ ◎ ◎ ◎
-   ◎ ╭─────────╮ ◎
-  ◎ ╭│  ⊛   ⊛  │╮ ◎
- ◎ ◎│   ╲ ─ ╱   │◎ ◎
-  ◎ │  ──┼≡┼──  │ ◎
-   ◎╰──╱     ╲──╯◎
-    ◎ ╱ ◎ ◎ ◎ ╲ ◎
-     ◎ ◎ ◎ ◎ ◎ ◎
-   ════════════════
-     PROCESSING"#;
+        ╭──◎──╮
+       ╭┤◎ ◎ ◎├╮
+      ◎│ ╭───╮ │◎
+      ◎│ │⊛ ⊛│ │◎
+      ◎│ │ ─ │ │◎
+       │ ╰───╯ │
+    ◎──┤ ◎ ◎ ◎ ├──◎
+   ╭───┤ ≋≋≋≋≋ ├───╮
+   │◎◎◎│ ◎ ◎ ◎ │◎◎◎│
+   ╰───┤       ├───╯
+       │ ◎   ◎ │
+       ╰┬─┴─┬─╯
+        │   │
+       ─┴─ ─┴─
+   ═══════════════
+    ⟳ THINKING..."#;
 
 const ARGUS_ALERT: &str = r#"
-     ⊙ ⊙ ⊙ ⊙ ⊙
-    ⊙ ⊙ ⊙ ⊙ ⊙ ⊙
-   ⊙ ╭─────────╮ ⊙
-  ⊙ ╭│  ⊚   ⊚  │╮ ⊙
- ⊙ ⊙│   ╲ ! ╱   │⊙ ⊙
-  ⊙ │  ══┼═┼══  │ ⊙
-   ⊙╰──╱     ╲──╯⊙
-    ⊙ ╱ ⊙ ⊙ ⊙ ╲ ⊙
-     ⊙ ⊙ ⊙ ⊙ ⊙ ⊙
-   ════════════════
-    ⚠ TOOL ACTIVE"#;
+        ╭──⊙──╮
+       ╭┤⊙ ⊙ ⊙├╮
+      ⊙│ ╭───╮ │⊙
+      ⊙│ │⊚ ⊚│ │⊙
+      ⊙│ │ ! │ │⊙
+       │ ╰───╯ │
+    ⊙──┤ ⊙ ⊙ ⊙ ├──⊙
+   ╭───┤ ▓▓▓▓▓ ├───╮
+   │⊙⊙⊙│ ⊙ ⊙ ⊙ │⊙⊙⊙│
+   ╰───┤       ├───╯
+       │ ⊙   ⊙ │
+       ╰┬─┴─┬─╯
+        │   │
+       ─┴─ ─┴─
+   ═══════════════
+    ⚡ EXECUTING"#;
 
 const ARGUS_SUCCESS: &str = r#"
-     ✦ ✦ ✦ ✦ ✦
-    ✦ ✦ ✦ ✦ ✦ ✦
-   ✦ ╭─────────╮ ✦
-  ✦ ╭│  ◉   ◉  │╮ ✦
- ✦ ✦│   ╲ ◡ ╱   │✦ ✦
-  ✦ │  ──┼─┼──  │ ✦
-   ✦╰──╱     ╲──╯✦
-    ✦ ╱ ✦ ✦ ✦ ╲ ✦
-     ✦ ✦ ✦ ✦ ✦ ✦
-   ════════════════
-     ✓ COMPLETE"#;
+        ╭──✦──╮
+       ╭┤✦ ✦ ✦├╮
+      ✦│ ╭───╮ │✦
+      ✦│ │◉ ◉│ │✦
+      ✦│ │ ◡ │ │✦
+       │ ╰───╯ │
+    ✦──┤ ✦ ✦ ✦ ├──✦
+   ╭───┤ ░░░░░ ├───╮
+   │✦✦✦│ ✦ ✦ ✦ │✦✦✦│
+   ╰───┤       ├───╯
+       │ ✦   ✦ │
+       ╰┬─┴─┬─╯
+        │   │
+       ─┴─ ─┴─
+   ═══════════════
+    ✓ COMPLETE"#;
 
 const LOGO: &str = r#"
     ___    ____  ______  __  _______
@@ -209,41 +229,78 @@ impl App {
             }
             "web_search" => {
                 let query = args["query"].as_str().unwrap_or("");
-                // Use DuckDuckGo HTML (no API key needed)
+                // Use Google search with a realistic user agent
                 let url = format!(
-                    "https://html.duckduckgo.com/html/?q={}",
+                    "https://www.google.com/search?q={}&num=10",
                     urlencoding::encode(query)
                 );
-                match reqwest::get(&url).await {
+                let client = reqwest::Client::builder()
+                    .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .build()
+                    .unwrap_or_default();
+                    
+                match client.get(&url).send().await {
                     Ok(resp) => {
                         match resp.text().await {
                             Ok(html) => {
-                                // Extract result snippets (basic parsing)
                                 let mut results = Vec::new();
-                                for (i, chunk) in html.split("result__snippet").enumerate() {
-                                    if i == 0 || i > 5 { continue; }
-                                    // Get text between > and <
-                                    if let Some(start) = chunk.find('>') {
-                                        if let Some(end) = chunk[start..].find('<') {
-                                            let snippet = &chunk[start+1..start+end];
-                                            let clean: String = snippet
+                                // Parse Google results - look for data-sncf divs or BNeawe class
+                                for part in html.split("<div class=\"BNeawe") {
+                                    if results.len() >= 8 { break; }
+                                    // Find text content
+                                    if let Some(start) = part.find('>') {
+                                        let after_tag = &part[start+1..];
+                                        if let Some(end) = after_tag.find('<') {
+                                            let text = &after_tag[..end];
+                                            let clean: String = text
                                                 .replace("&quot;", "\"")
                                                 .replace("&amp;", "&")
                                                 .replace("&lt;", "<")
                                                 .replace("&gt;", ">")
+                                                .replace("&#39;", "'")
                                                 .chars()
                                                 .filter(|c| !c.is_control())
                                                 .collect();
-                                            if clean.len() > 20 {
-                                                results.push(format!("• {}", clean.trim()));
+                                            let trimmed = clean.trim();
+                                            // Filter out short/junk results
+                                            if trimmed.len() > 40 && !trimmed.contains("http") {
+                                                results.push(format!("• {}", trimmed));
                                             }
                                         }
                                     }
                                 }
                                 if results.is_empty() {
-                                    "No results found".to_string()
+                                    // Fallback: try DuckDuckGo
+                                    let ddg_url = format!(
+                                        "https://html.duckduckgo.com/html/?q={}",
+                                        urlencoding::encode(query)
+                                    );
+                                    if let Ok(ddg_resp) = reqwest::get(&ddg_url).await {
+                                        if let Ok(ddg_html) = ddg_resp.text().await {
+                                            for (i, chunk) in ddg_html.split("result__snippet").enumerate() {
+                                                if i == 0 || i > 5 { continue; }
+                                                if let Some(start) = chunk.find('>') {
+                                                    if let Some(end) = chunk[start..].find('<') {
+                                                        let snippet = &chunk[start+1..start+end];
+                                                        let clean: String = snippet
+                                                            .replace("&quot;", "\"")
+                                                            .replace("&amp;", "&")
+                                                            .chars()
+                                                            .filter(|c| !c.is_control())
+                                                            .collect();
+                                                        if clean.len() > 20 {
+                                                            results.push(format!("• {}", clean.trim()));
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if results.is_empty() {
+                                    "No results found - try rephrasing your search".to_string()
                                 } else {
-                                    results.join("\n\n")
+                                    format!("🔍 Search results for '{}':\n\n{}", query, results.join("\n\n"))
                                 }
                             }
                             Err(e) => format!("Error reading response: {}", e),
@@ -346,7 +403,7 @@ impl App {
                 "type": "function",
                 "function": {
                     "name": "web_search",
-                    "description": "Search the web using DuckDuckGo. Returns top results.",
+                    "description": "Search Google for current information, news, facts, or anything you don't know. Always use this for questions about recent events, people, or things that may have changed.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -366,9 +423,32 @@ impl App {
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
-                "model": "arcee-ai/trinity-mini:free",
-                "messages": [{"role": "user", "content": user_msg}],
-                "tools": tools
+                "model": "x-ai/grok-4-fast",
+                "messages": [
+                    {
+                        "role": "system", 
+                        "content": "You are ARGUS - The Hundred-Eyed Agent. Named after Argus Panoptes, the all-seeing giant of Greek mythology, you are a secure, tool-equipped AI agent built in Rust.
+
+Your capabilities via tools:
+• read_file: Read any file's contents
+• write_file: Create or modify files  
+• list_directory: See what's in folders
+• shell: Execute system commands (safely)
+• web_search: Search Google for current info, news, facts
+
+CRITICAL RULES:
+1. ALWAYS use tools when relevant - you are an AGENT, not just a chatbot
+2. For ANY question about current events, news, prices, weather, or recent info → use web_search
+3. For file/system questions → use the appropriate file/shell tool
+4. Never say 'I cannot' if you have a tool that can help
+5. Be direct, efficient, and action-oriented
+
+You run locally with encrypted secrets, hardware keychain integration, and memory-safe Rust. You are the secure alternative to agents that store credentials in plaintext."
+                    },
+                    {"role": "user", "content": user_msg}
+                ],
+                "tools": tools,
+                "tool_choice": "auto"
             }))
             .send()
             .await?;
