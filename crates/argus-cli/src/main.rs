@@ -1,19 +1,12 @@
-//! Argus CLI - The hundred-eyed agent
-//!
-//! Usage:
-//!   argus init    - Initialize vault and configuration
-//!   argus run     - Start interactive agent session
-//!   argus watch   - Continuous agent mode
-//!   argus vault   - Manage secrets
+//! Argus CLI
 
 use clap::{Parser, Subcommand};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use std::io::{self, Write};
+use std::path::PathBuf;
+use argus_crypto::SecureVault;
 
 #[derive(Parser)]
-#[command(name = "argus")]
-#[command(author = "HeyBattle1")]
-#[command(version)]
-#[command(about = "The hundred-eyed agent runtime", long_about = None)]
+#[command(name = "argus", version, about = "The hundred-eyed agent runtime")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -21,16 +14,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize Argus (create vault, configure LLM)
     Init,
-    
-    /// Start an interactive agent session
-    Run,
-    
-    /// Continuous agent mode
-    Watch,
-    
-    /// Manage the secrets vault
     Vault {
         #[command(subcommand)]
         action: VaultAction,
@@ -39,88 +23,60 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum VaultAction {
-    /// Store a secret
-    Set {
-        /// Name of the secret
-        key: String,
-    },
-    
-    /// Retrieve a secret (prints masked)
-    Get {
-        /// Name of the secret
-        key: String,
-    },
-    
-    /// List all stored secrets
+    Set { key: String },
+    Get { key: String },
     List,
-    
-    /// Delete a secret
-    Delete {
-        /// Name of the secret
-        key: String,
-    },
+    Delete { key: String },
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Initialize logging
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-    
+fn vault_path() -> PathBuf {
+    dirs::home_dir().unwrap().join(".argus").join("vault.enc")
+}
+
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    
+
     match cli.command {
         Commands::Init => {
             println!("👁️  Initializing Argus...");
-            println!();
-            println!("This will:");
-            println!("  1. Create an encrypted vault for your secrets");
-            println!("  2. Store the master key in your system keychain");
-            println!("  3. Configure your LLM provider");
-            println!();
-            // TODO: Implement init
-            println!("⚠️  Not yet implemented");
+            let path = vault_path();
+            if path.exists() {
+                println!("Vault already exists at {:?}", path);
+                return Ok(());
+            }
+            SecureVault::init(path)?;
+            println!("✅ Vault created. Master key stored in system keychain.");
         }
-        
-        Commands::Run => {
-            println!("👁️  Argus is watching...");
-            // TODO: Implement interactive mode
-            println!("⚠️  Not yet implemented");
-        }
-        
-        Commands::Watch => {
-            println!("👁️  Argus enters continuous watch mode...");
-            // TODO: Implement watch mode
-            println!("⚠️  Not yet implemented");
-        }
-        
         Commands::Vault { action } => {
+            let mut vault = SecureVault::new(vault_path());
+            vault.unlock()?;
+            
             match action {
                 VaultAction::Set { key } => {
-                    println!("Storing secret: {}", key);
-                    // TODO: Implement
-                    println!("⚠️  Not yet implemented");
+                    print!("Enter secret value: ");
+                    io::stdout().flush()?;
+                    let mut value = String::new();
+                    io::stdin().read_line(&mut value)?;
+                    vault.store(&key, value.trim())?;
+                    println!("✅ Stored: {}", key);
                 }
                 VaultAction::Get { key } => {
-                    println!("Retrieving secret: {}", key);
-                    // TODO: Implement
-                    println!("⚠️  Not yet implemented");
+                    match vault.retrieve(&key) {
+                        Ok(v) => println!("{}", v),
+                        Err(e) => println!("Error: {}", e),
+                    }
                 }
                 VaultAction::List => {
-                    println!("Stored secrets:");
-                    // TODO: Implement
-                    println!("⚠️  Not yet implemented");
+                    for k in vault.list_keys() {
+                        println!("  {}", k);
+                    }
                 }
                 VaultAction::Delete { key } => {
-                    println!("Deleting secret: {}", key);
-                    // TODO: Implement
-                    println!("⚠️  Not yet implemented");
+                    vault.delete(&key)?;
+                    println!("✅ Deleted: {}", key);
                 }
             }
         }
     }
-    
     Ok(())
 }

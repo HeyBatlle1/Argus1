@@ -2,9 +2,6 @@
 name = "argus-cli"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
-license.workspace = true
-description = "Command-line interface for Argus"
 
 [[bin]]
 name = "argus"
@@ -12,17 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-anyhow.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
 clap.workspace = true
-ratatui.workspace = true
-crossterm.workspace = true
-
-argus-core = { path = "../argus-core" }
+anyhow.workspace = true
+dirs = "5.0"
 argus-crypto = { path = "../argus-crypto" }
-argus-memory = { path = "../argus-memory" }
-argus-sandbox = { path = "../argus-sandbox" }
