@@ -13,5 +13,7 @@ clap.workspace = true
 anyhow.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 serde_json.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
 dirs = "5.0"
 argus-crypto = { path = "../argus-crypto" }
