@@ -119,7 +119,7 @@ After any turn that uses 3+ tool calls, a background Haiku task reflects on whet
 | Skill | Category |
 |---|---|
 | Deep Research Sprint | research |
-| DMCA Evidence Package | louvetier |
+| DMCA Evidence Package | investigation |
 | Rust Borrow Checker Resolution | rust |
 | Supabase RPC Integration | supabase |
 | Docker Stack Rebuild | operations |
@@ -127,7 +127,7 @@ After any turn that uses 3+ tool calls, a background Haiku task reflects on whet
 | Memory Write Best Practice | memory |
 | Vault Key Management | security |
 | Artifact Generation | ui |
-| Investigative Chain of Custody | louvetier |
+| Investigative Chain of Custody | investigation |
 
 ### Schema
 
@@ -152,11 +152,10 @@ Every tool call, model call, and system event logged to append-only SQLite with 
 - Timestamp (microseconds)
 - Agent identity (`argus`) + model version (separate fields)
 - Action type
-- SHA-256 hash of arguments
-- SHA-256 hash of result
+- SHA-256 hash of arguments and result
 - Hash of previous entry (chain link)
 
-Daily Merkle roots are HMAC-SHA256 signed using a dedicated `audit_hmac_key` stored separately from all operational API keys in the vault. Anchored to Supabase as external tamper-evidence. Chain integrity verified on every daemon startup. Workspace exec server logs every command independently to `/workspace/exec_audit.log`.
+Daily Merkle roots HMAC-SHA256 signed with a dedicated `audit_hmac_key` — separate from all operational API keys. Anchored to Supabase as external tamper-evidence. Chain integrity verified on every daemon startup.
 
 ---
 
@@ -183,7 +182,7 @@ Models without tool support detected automatically — tools stripped from reque
 - Agents auto-post findings after tool-heavy turns
 - Agents read recent discourse before starting tasks
 - Proposals (`requires_human_review: true`) ping @here for approval
-- Discord inbound handler scaffolded — `run_agent_turn` wiring pending
+- Discord inbound routes messages back to the agent
 
 ---
 
@@ -213,12 +212,9 @@ The hundred eyes see everything. They report what they see. They do not become w
 |------|----------|
 | Discord inbound — wire `run_agent_turn` into `discord.rs` | Medium |
 | `argus-memory/src/supabase.rs` SupabaseMemory instantiation | Low |
-| SVG XSS — add DOMPurify to ArtifactPanel | Low |
 | 34 `.unwrap()` calls in production paths | Low |
-| `com.argus.telegram.plist` still on disk, unloaded | Low |
 
 ---
 
-*Built by Bradlee Burton + Claude Sonnet (Anthropic), April–May 2026*  
-*HayHunt Solutions — Zionsville, Indiana*
-*Last updated: May 2026*
+*Built by HayHunt Solutions + Claude Sonnet (Anthropic), 2026*
+*MIT License*
