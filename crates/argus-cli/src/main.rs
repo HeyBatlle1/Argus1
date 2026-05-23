@@ -266,17 +266,20 @@ async fn main() -> anyhow::Result<()> {
                 .and_then(|s| s.parse().ok());
 
             // Spawn check-in loop + build EmbeddingClient if Supabase is configured
+            let supabase_client: Option<argus_core::supabase::SupabaseClient>;
             let embedding_client = if let (Some(url), Some(key)) = (supabase_url, supabase_key) {
                 let supabase = argus_core::supabase::SupabaseClient::new(url, key);
                 if let (Some(token), Some(chat_id)) = (bot_token.clone(), checkin_chat_id) {
                     checkin::spawn_checkin_loop(supabase.clone(), token, chat_id);
                     println!("[+] Check-in loop started");
                 }
-                let ec = argus_core::EmbeddingClient::new(&config.api_key, supabase);
+                let ec = argus_core::EmbeddingClient::new(&config.api_key, supabase.clone());
                 println!("[+] Semantic memory enabled (768-dim pgvector)");
+                supabase_client = Some(supabase);
                 Some(ec)
             } else {
                 println!("[!] Supabase not configured — check-in loop and semantic memory disabled");
+                supabase_client = None;
                 None
             };
             config.skills = embedding_client.as_ref().map(|ec| {
@@ -347,6 +350,71 @@ async fn main() -> anyhow::Result<()> {
                     // Log this daemon startup as a system event
                     let _ = chain.append(&config.model, "system", None,
                         Some("daemon_startup"), Some("ok"));
+
+                    // ── Crash sentinel + Discord startup post ──────────────
+                    // On every startup we check for a sentinel file that the
+                    // daemon writes on clean shutdown. If it's missing the
+                    // process was killed unexpectedly — we flag it as a crash.
+                    // Either way we post to #ops via discourse so there's always
+                    // a record in Discord when the daemon comes back up.
+                    let sentinel_path = format!("{}/daemon.sentinel", data_dir);
+                    let was_crash = !std::path::Path::new(&sentinel_path).exists();
+
+                    if let Some(ref sb) = supabase_client {
+                        let model = config.model.clone();
+                        let sb = sb.clone();
+                        let sentinel = sentinel_path.clone();
+                        tokio::spawn(async move {
+                            let (title, content) = if was_crash {
+                                (
+                                    "Daemon restarted after unexpected shutdown".to_string(),
+                                    format!(
+                                        "The daemon came back online but no clean shutdown sentinel was found.\n\n\
+                                        This means the process was killed, OOM'd, or the container restarted \
+                                        without a graceful exit.\n\n\
+                                        Model: {}\n\
+                                        Action: Review logs with `docker logs argus-daemon --tail 100`",
+                                        model
+                                    ),
+                                )
+                            } else {
+                                (
+                                    "Daemon online".to_string(),
+                                    format!(
+                                        "Daemon started cleanly.\n\nModel: {}\nAll systems nominal.",
+                                        model
+                                    ),
+                                )
+                            };
+
+                            let post = argus_core::supabase::DiscoursePost {
+                                from_agent: "argus-daemon".to_string(),
+                                post_type: if was_crash { "finding".to_string() } else { "reflection".to_string() },
+                                content: format!("**{}**\n\n{}", title, content),
+                                task_context: Some("daemon_lifecycle".to_string()),
+                                requires_human_review: was_crash,
+                            };
+
+                            if let Err(e) = sb.write_discourse(&post).await {
+                                eprintln!("[!] Failed to post startup notice to discourse: {}", e);
+                            } else {
+                                println!("[+] Startup notice posted to Discord #ops");
+                            }
+
+                            // Write sentinel — signals next startup was clean
+                            let _ = std::fs::write(&sentinel, chrono::Utc::now().to_rfc3339());
+                        });
+                    }
+
+                    // Register shutdown handler to remove sentinel (signals clean exit)
+                    {
+                        let sentinel = sentinel_path.clone();
+                        tokio::spawn(async move {
+                            let _ = tokio::signal::ctrl_c().await;
+                            let _ = std::fs::remove_file(&sentinel);
+                            println!("[+] Clean shutdown — sentinel cleared");
+                        });
+                    }
 
                     let chain_arc = std::sync::Arc::new(chain);
 
