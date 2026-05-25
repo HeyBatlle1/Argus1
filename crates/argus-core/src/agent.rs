@@ -222,6 +222,10 @@ pub fn model_supports_tools(model_id: &str) -> bool {
     !matches!(model_id, MODEL_GROK_MULTI)
 }
 
+/// All fields are Clone (Arc clones are pointer-only; EmbeddingClient and
+/// SkillsClient both derive Clone). Derive lets call sites use config.clone()
+/// instead of writing manual field-copy blocks.
+#[derive(Clone)]
 pub struct AgentConfig {
     pub api_key: String,
     pub model: String,

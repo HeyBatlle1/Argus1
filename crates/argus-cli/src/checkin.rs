@@ -1,20 +1,46 @@
-//! Autonomous check-in loop — alert-only mode
+//! Autonomous check-in loop — active agent mode
 //!
-//! Fires every interval_minutes, respects quiet hours.
-//! Sends a Telegram message ONLY when something needs attention:
-//!   • Disk usage > 80%
-//!   • Memory usage > 90%
-//!   • Any container is unhealthy or exited unexpectedly
+//! ## Overview
 //!
-//! Additionally sends a daily health summary once per day around midnight
-//! (within the next check-in window after 00:00) — one message regardless
-//! of health status, so there's always a daily heartbeat.
+//! The check-in loop wakes on `interval_minutes`, respects quiet hours, and
+//! performs two distinct roles:
 //!
-//! This reduces Telegram noise from ~12 messages/day to 1/day (daily summary)
-//! unless something actually needs attention.
+//! **Alert mode** — fires immediately when thresholds are exceeded:
+//!   - Disk usage > 80 %
+//!   - Memory usage > 90 %
+//!   - Any container unhealthy or exited unexpectedly
+//!
+//! **Daily heartbeat** — fires once per calendar day (first tick after midnight).
+//!   Previously this sent only a system-status summary.  After the May 2026
+//!   upgrade it also runs `run_agent_checkin`, which calls `run_agent_turn` so
+//!   the agent can make a genuine observation rather than just reporting metrics.
+//!
+//! **Weekly tech sweep** — replaces the daily heartbeat on Sunday midnight.
+//!   The agent searches for Rust crate updates, AI/agent developments, and open
+//!   codebase items, then posts a tagged `[WEEKLY SWEEP]` finding to Discord.
+//!
+//! ## Telegram message format (after upgrade)
+//!
+//! ```text
+//! ✅ Argus Daily — 2026-05-26 00:00:00
+//!
+//! Finding: I noticed the semantic memory prefetch fired 38 times on
+//! queries under 5 words despite the short-query guard. Possible guard
+//! threshold drift. Posted details to #findings.
+//!
+//! Disk: 42% | Memory: 61% | Containers: healthy
+//! [Full finding posted to Discord #findings]
+//! ```
+//!
+//! Alert messages suppress the finding — the alert takes priority.
 
-use argus_core::supabase::{CheckinLogEntry, SupabaseClient};
-use chrono::{Local, NaiveDate, NaiveTime};
+use argus_core::agent::{AgentConfig, AgentEvent, MODEL_GEMINI, MODEL_OPUS, MODEL_SONNET};
+use argus_core::mcp::McpClient;
+use argus_core::shell::ShellPolicy;
+use argus_core::supabase::{CheckinLogEntry, DiscoursePost, SupabaseClient};
+use argus_core::tools::MemoryBackend;
+use argus_core::run_agent_turn;
+use chrono::{Datelike, Local, NaiveDate, NaiveTime, Timelike};
 use reqwest::Client;
 use tokio::time::{sleep, Duration};
 
@@ -23,24 +49,34 @@ const DISK_ALERT_PCT: u8 = 80;
 const MEM_ALERT_PCT: u8 = 90;
 
 /// Entry point — spawns the check-in loop as a background task.
+///
+/// `agent_config` gives the loop full agent capabilities (API key, model,
+/// embedding, skills, audit chain) so it can call `run_agent_turn` on the
+/// daily and weekly heartbeats rather than only reporting system metrics.
 pub fn spawn_checkin_loop(
     supabase: SupabaseClient,
     bot_token: String,
     chat_id: i64,
+    agent_config: AgentConfig,
 ) {
     tokio::spawn(async move {
-        run_checkin_loop(supabase, bot_token, chat_id).await;
+        run_checkin_loop(supabase, bot_token, chat_id, agent_config).await;
     });
 }
 
-async fn run_checkin_loop(supabase: SupabaseClient, bot_token: String, chat_id: i64) {
+async fn run_checkin_loop(
+    supabase: SupabaseClient,
+    bot_token: String,
+    chat_id: i64,
+    agent_config: AgentConfig,
+) {
     let client = Client::new();
     let mut last_daily: Option<NaiveDate> = None;
 
     loop {
-        let config = supabase.read_checkin_config().await;
+        let checkin_cfg = supabase.read_checkin_config().await;
 
-        if config.telegram_enabled && !in_quiet_hours(&config) {
+        if checkin_cfg.telegram_enabled && !in_quiet_hours(&checkin_cfg) {
             let health = collect_system_health().await;
             let today = Local::now().date_naive();
 
@@ -48,16 +84,39 @@ async fn run_checkin_loop(supabase: SupabaseClient, bot_token: String, chat_id: 
                 || health.mem_pct > MEM_ALERT_PCT
                 || health.has_unhealthy_container;
 
-            // Daily summary fires once per calendar day (first check-in after midnight)
+            // Daily heartbeat: first tick after midnight each calendar day
             let needs_daily = last_daily.map_or(true, |d| d < today);
+
+            // Weekly tech sweep: replaces the daily heartbeat on Sunday midnight.
+            // Rotates models by ISO week number so different models run each week.
+            let is_weekly_sweep = needs_daily && {
+                let now = Local::now();
+                now.weekday() == chrono::Weekday::Sun && now.hour() == 0
+            };
 
             if needs_alert || needs_daily {
                 let schedule_summary = read_schedule_summary(&supabase).await;
+
+                // Run the agent turn on daily heartbeats (not on pure alerts — alert
+                // messages are time-sensitive and we don't want to delay them).
+                let agent_finding: Option<String> = if needs_daily && !needs_alert {
+                    run_agent_checkin(&supabase, &agent_config, &health, is_weekly_sweep).await
+                } else {
+                    None
+                };
+
+                // Post finding to the discourse table — pg_net trigger fires automatically
+                // and relays the post to Discord #findings.
+                if let Some(ref finding) = agent_finding {
+                    post_finding_to_discourse(&supabase, &agent_config, finding, is_weekly_sweep).await;
+                }
+
                 let message = format_checkin_message(
                     &health,
                     &schedule_summary,
                     needs_alert,
                     needs_daily,
+                    agent_finding.as_deref(),
                 );
 
                 if let Err(e) = send_telegram_message(&client, &bot_token, chat_id, &message).await
@@ -69,12 +128,10 @@ async fn run_checkin_loop(supabase: SupabaseClient, bot_token: String, chat_id: 
                     }
 
                     let entry = CheckinLogEntry {
-                        checkin_type: config.checkin_type.clone(),
+                        checkin_type: checkin_cfg.checkin_type.clone(),
                         status: if needs_alert { "alert" } else { "daily" }.to_string(),
                         message_sent: message,
-                        system_health: Some(
-                            serde_json::to_value(&health).unwrap_or_default(),
-                        ),
+                        system_health: Some(serde_json::to_value(&health).unwrap_or_default()),
                     };
                     if let Err(e) = supabase.write_checkin_log(&entry).await {
                         eprintln!("[checkin] Failed to write checkin log: {}", e);
@@ -84,7 +141,7 @@ async fn run_checkin_loop(supabase: SupabaseClient, bot_token: String, chat_id: 
             // else: everything healthy, not daily time — silent pass
         }
 
-        let interval = Duration::from_secs(config.interval_minutes.max(1) as u64 * 60);
+        let interval = Duration::from_secs(checkin_cfg.interval_minutes.max(1) as u64 * 60);
         sleep(interval).await;
     }
 }
@@ -111,6 +168,251 @@ fn in_quiet_hours(config: &argus_core::supabase::CheckinConfig) -> bool {
         now >= start || now < end
     } else {
         now >= start && now < end
+    }
+}
+
+// ── NoopMemory ─────────────────────────────────────────────────────────────
+//
+// The check-in agent turn doesn't need persistent memory — it has the full
+// semantic embedding client for recall via pgvector.  We satisfy the
+// MemoryBackend parameter with a noop implementation so the call compiles
+// without pulling in argus-memory as a checkin dependency.
+
+struct NoopMemory;
+
+impl MemoryBackend for NoopMemory {
+    fn remember(&self, _: &str, _: &str, _: Option<&str>, _: f64) -> Result<String, String> {
+        Ok("(memory disabled in check-in mode — use the embedding client)".to_string())
+    }
+    fn recall(&self, _: Option<&str>, _: Option<&str>, _: usize) -> Result<Vec<argus_core::tools::MemoryRecord>, String> {
+        Ok(vec![])
+    }
+    fn forget(&self, _: &str) -> Result<String, String> {
+        Ok("(memory disabled in check-in mode)".to_string())
+    }
+}
+
+// ── Agent check-in ─────────────────────────────────────────────────────────
+
+/// Drive one agentic check-in turn — the heart of the May 2026 upgrade.
+///
+/// ## What it does
+///
+/// Builds three context blocks and passes them to `run_agent_turn` as the
+/// user message (the agent self-initiates; there is no human user in this
+/// path):
+///
+/// 1. **System health** — current disk/memory/container snapshot.
+/// 2. **Recent intranet activity** — last 5 discourse posts from any agent.
+/// 3. **Audit activity** — today's logged tool-call count and chain integrity.
+///
+/// The agent is then free to use any tool (web_search, recall, read_file, …)
+/// to investigate something worth noting.  Its text response is returned as
+/// the "finding" string.
+///
+/// ## Weekly sweep vs daily observation
+///
+/// When `is_weekly` is true the prompt switches to a deeper tech sweep:
+/// crate-update search, AI/agent developments, open codebase items.
+/// The model is also rotated by ISO week number so the sweep runs on a
+/// different brain each week (Sonnet → Gemini → Opus → repeat).
+///
+/// ## Failure handling
+///
+/// Returns `None` on any failure so the Telegram message can still be sent
+/// (without a finding block). Errors are logged to stderr.
+async fn run_agent_checkin(
+    supabase: &SupabaseClient,
+    config: &AgentConfig,
+    health: &SystemHealth,
+    is_weekly: bool,
+) -> Option<String> {
+    // ── Context: intranet discourse ─────────────────────────────────────
+    let discourse_block = match supabase.read_recent_discourse(5, None).await {
+        Ok(posts) if !posts.is_empty() => {
+            let mut block = String::from("RECENT INTRANET ACTIVITY (last 5 posts):\n");
+            for post in &posts {
+                let ts = post.created_at.as_deref().unwrap_or("unknown time");
+                let snippet = if post.content.len() > 200 {
+                    format!("{}…", &post.content[..200])
+                } else {
+                    post.content.clone()
+                };
+                block.push_str(&format!(
+                    "\n[{} | {}] {}: {}",
+                    ts, post.post_type, post.from_agent, snippet
+                ));
+            }
+            block
+        }
+        Ok(_) => "RECENT INTRANET ACTIVITY: No posts in the last period.".to_string(),
+        Err(e) => {
+            eprintln!("[checkin] Discourse read failed (continuing): {}", e);
+            "RECENT INTRANET ACTIVITY: Unavailable.".to_string()
+        }
+    };
+
+    // ── Context: audit chain activity ────────────────────────────────────
+    let audit_block = if let Some(ref audit) = config.audit {
+        match audit.entry_count_today() {
+            Ok(n)  => format!("AUDIT ACTIVITY TODAY: {} tool/model calls logged — chain intact.", n),
+            Err(e) => format!("AUDIT ACTIVITY TODAY: Read error — {}", e),
+        }
+    } else {
+        "AUDIT ACTIVITY TODAY: Audit chain not configured.".to_string()
+    };
+
+    // ── Context: system health ───────────────────────────────────────────
+    let health_block = format!(
+        "SYSTEM HEALTH:\nDisk: {} | Memory: {} | Containers: {}",
+        health.disk,
+        health.memory,
+        if health.has_unhealthy_container {
+            format!("ISSUE DETECTED\n{}", health.containers)
+        } else {
+            "healthy".to_string()
+        }
+    );
+
+    // ── Determine effective model ────────────────────────────────────────
+    // Weekly sweep rotates across Sonnet → Gemini → Opus by ISO week number.
+    // Daily observation uses whatever model the daemon is currently configured with.
+    let weekly_config;
+    let effective_config: &AgentConfig = if is_weekly {
+        let week_num = Local::now().iso_week().week();
+        let sweep_model = match week_num % 3 {
+            0 => MODEL_SONNET,
+            1 => MODEL_GEMINI,
+            _ => MODEL_OPUS,
+        };
+        eprintln!("[checkin] Weekly sweep — using model: {} (ISO week {})", sweep_model, week_num);
+        weekly_config = AgentConfig {
+            model: sweep_model.to_string(),
+            ..config.clone()
+        };
+        &weekly_config
+    } else {
+        config
+    };
+
+    // ── Build prompt ─────────────────────────────────────────────────────
+    let prompt = if is_weekly {
+        format!(
+            r#"[WEEKLY SWEEP] You are running the weekly technology sweep for Argus.
+This replaces the daily check-in this week.
+
+{}
+
+{}
+
+{}
+
+YOUR TASKS:
+1. Search for updates to the key Rust crates Argus depends on:
+   tokio, axum, wasmtime, reqwest, serde, rusqlite, uuid
+2. Search for relevant AI/agent developments this week that could
+   affect Argus architecture or capability.
+3. Note any open codebase items you're aware of:
+   - .unwrap() cleanup
+   - Ollama provider support
+   - Linux keychain fallback
+4. Write a concise findings report:
+   - Any crate updates worth applying (name version numbers)
+   - Any architectural observations
+   - Any open item progress recommendations
+   - Tag anything requiring architectural discussion with [NEEDS REVIEW]
+
+Be specific. Name versions. This report goes directly to Discord #findings."#,
+            health_block, discourse_block, audit_block
+        )
+    } else {
+        format!(
+            r#"You are running your daily check-in. This is your window to be useful,
+not just to report status.
+
+{}
+
+{}
+
+{}
+
+Your task:
+1. Review the above context.
+2. Identify ONE thing worth investigating, noting, or improving — something
+   concrete you can actually act on in the next few minutes.
+3. Do it — use your tools if needed (web_search, recall, http_request).
+4. Write a brief finding of 3–5 sentences.
+
+Do not summarise system status — that is handled separately.
+Do not report that everything is fine — find something worth saying.
+Return only your finding, ready to be posted to Discord #findings."#,
+            health_block, discourse_block, audit_block
+        )
+    };
+
+    // ── Run the agent turn ───────────────────────────────────────────────
+    // Empty history (self-initiated turn), empty MCP (no servers needed),
+    // default shell policy (blocks HIGH risk), noop memory (embedding handles recall).
+    let http = reqwest::Client::new();
+    let mut mcp = McpClient::new();
+    let shell_policy = ShellPolicy::default();
+    let memory = NoopMemory;
+
+    eprintln!(
+        "[checkin] Running {} check-in with model {}",
+        if is_weekly { "weekly sweep" } else { "daily" },
+        effective_config.model
+    );
+
+    match run_agent_turn(
+        effective_config,
+        &prompt,
+        &[],   // no prior conversation history — agent self-initiates
+        &shell_policy,
+        &memory,
+        &mut mcp,
+        &http,
+        |event| {
+            if let AgentEvent::ToolCall { name, preview, .. } = event {
+                eprintln!("[checkin] tool: {} — {}", name, preview);
+            }
+        },
+    )
+    .await
+    {
+        Ok(finding) => {
+            eprintln!("[checkin] Agent finding ({} chars)", finding.len());
+            Some(finding)
+        }
+        Err(e) => {
+            eprintln!("[checkin] Agent turn failed: {}", e);
+            None
+        }
+    }
+}
+
+/// Write the agent's finding to the discourse table.
+///
+/// The pg_net trigger on `argus_agent_discourse` fires automatically and
+/// relays the post to Discord #findings — no direct Discord API call needed.
+async fn post_finding_to_discourse(
+    supabase: &SupabaseClient,
+    config: &AgentConfig,
+    finding: &str,
+    is_weekly: bool,
+) {
+    let label = if is_weekly { "Weekly Tech Sweep" } else { "Daily Observation" };
+    let post = DiscoursePost {
+        from_agent: format!("argus-checkin/{}", config.model),
+        post_type: if is_weekly { "finding".to_string() } else { "reflection".to_string() },
+        content: format!("**[ARGUS CHECKIN] {}**\n\n{}", label, finding),
+        task_context: Some("scheduled_checkin".to_string()),
+        requires_human_review: false,
+    };
+    if let Err(e) = supabase.write_discourse(&post).await {
+        eprintln!("[checkin] Failed to post finding to discourse: {}", e);
+    } else {
+        eprintln!("[checkin] Finding posted to Discord #findings via discourse table");
     }
 }
 
@@ -218,19 +520,51 @@ async fn collect_system_health() -> SystemHealth {
 
 // ── Formatting ─────────────────────────────────────────────────────────────
 
+/// Format the Telegram message sent to Bradlee.
+///
+/// ## Message layout (daily heartbeat)
+///
+/// ```text
+/// ✅ Argus Daily — 2026-05-26 00:00:00
+///
+/// Finding: I noticed the semantic memory prefetch fired 38 times on
+/// queries under 5 words despite the short-query guard. Possible guard
+/// threshold drift. Full details posted to Discord #findings.
+///
+/// Disk: 42/100G used, 58G free (42%) | Memory: 3.1G used, 1.2G free (72%)
+/// Containers: healthy
+/// ```
+///
+/// When `is_alert` is true the finding block is suppressed — alert messages
+/// are time-sensitive and must be read at a glance.
 fn format_checkin_message(
     health: &SystemHealth,
     schedule: &str,
     is_alert: bool,
     is_daily: bool,
+    finding: Option<&str>,
 ) -> String {
     let mut msg = if is_alert {
         format!("⚠️ Argus Alert — {}\n\n", health.timestamp)
     } else {
-        format!("✅ Argus Daily Summary — {}\n\n", health.timestamp)
+        format!("✅ Argus Daily — {}\n\n", health.timestamp)
     };
 
-    // Alert details — be specific about what's wrong
+    // Agent finding — daily heartbeat only, never on pure alerts
+    if is_daily && !is_alert {
+        if let Some(text) = finding {
+            // Truncate to ~300 chars so Telegram stays readable on mobile
+            let snippet = if text.len() > 300 {
+                format!("{}…", text.chars().take(300).collect::<String>())
+            } else {
+                text.to_string()
+            };
+            msg.push_str(&format!("Finding: {}\n\n", snippet));
+            msg.push_str("[Full finding posted to Discord #findings]\n\n");
+        }
+    }
+
+    // System metrics — alert: show only breached metrics; daily: show all
     if health.disk_pct > DISK_ALERT_PCT {
         msg.push_str(&format!("🔴 Disk: {} — ABOVE {}% THRESHOLD\n", health.disk, DISK_ALERT_PCT));
     } else if is_daily {
@@ -244,9 +578,9 @@ fn format_checkin_message(
     }
 
     if health.has_unhealthy_container {
-        msg.push_str(&format!("\n🔴 Container issue detected:\n{}\n", health.containers));
+        msg.push_str(&format!("\n🔴 Container issue:\n{}\n", health.containers));
     } else if is_daily {
-        msg.push_str(&format!("\nContainers:\n{}\n", health.containers));
+        msg.push_str("Containers: healthy\n");
     }
 
     if !schedule.is_empty() && is_daily {

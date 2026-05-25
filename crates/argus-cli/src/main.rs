@@ -269,10 +269,8 @@ async fn main() -> anyhow::Result<()> {
             let supabase_client: Option<argus_core::supabase::SupabaseClient>;
             let embedding_client = if let (Some(url), Some(key)) = (supabase_url, supabase_key) {
                 let supabase = argus_core::supabase::SupabaseClient::new(url, key);
-                if let (Some(token), Some(chat_id)) = (bot_token.clone(), checkin_chat_id) {
-                    checkin::spawn_checkin_loop(supabase.clone(), token, chat_id);
-                    println!("[+] Check-in loop started");
-                }
+                // Check-in loop is spawned later, after config is fully assembled
+                // (embedding, skills, shell_prompter, audit all wired in before spawn).
                 let ec = argus_core::EmbeddingClient::new(&config.api_key, supabase.clone());
                 println!("[+] Semantic memory enabled (768-dim pgvector)");
                 supabase_client = Some(supabase);
@@ -475,23 +473,25 @@ async fn main() -> anyhow::Result<()> {
             };
             config.audit = audit_arc;
 
+            // Spawn check-in loop with fully-assembled config.
+            // Doing this here (rather than earlier in the Supabase block) ensures
+            // the agent receives embedding, skills, shell_prompter, and the audit
+            // chain — all capabilities that are wired in after Supabase is set up.
+            if let (Some(ref sb), Some(token), Some(chat_id)) = (
+                &supabase_client,
+                bot_token.as_deref(),
+                checkin_chat_id,
+            ) {
+                checkin::spawn_checkin_loop(sb.clone(), token.to_string(), chat_id, config.clone());
+                println!("[+] Check-in loop started (full agent capabilities)");
+            }
+
             // Start web server on port 9000 as a background task so the
             // Next.js frontend can connect via WebSocket while Telegram runs.
             // Pass the full daemon config so the web UI gets shell approval,
             // workspace auth, semantic memory, and audit — same capabilities as Telegram.
             {
-                let web_cfg = AgentConfig {
-                    api_key:         config.api_key.clone(),
-                    model:           config.model.clone(),
-                    api_url:         config.api_url.clone(),
-                    temperature:     config.temperature,
-                    brave_search_key: config.brave_search_key.clone(),
-                    shell_prompter:  config.shell_prompter.clone(),
-                    exec_auth_token: config.exec_auth_token.clone(),
-                    embedding:       config.embedding.clone(),
-                    skills:          config.skills.clone(),
-                    audit:           config.audit.clone(),
-                };
+                let web_cfg = config.clone(); // AgentConfig derives Clone
                 let web_vault_keys = vault.as_ref()
                     .map(|v| v.list_keys())
                     .unwrap_or_default();
