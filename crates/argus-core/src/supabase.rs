@@ -13,13 +13,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // ── Config shape (matches argus_checkin_config table) ──────────────────────
+//
+// quiet_hours_start / quiet_hours_end are stored as plain integers in
+// Postgres (e.g. 23, 7) representing the hour boundary.  The old
+// Option<String> type caused serde to reject the entire row and fall back
+// to CheckinConfig::default(), silently ignoring the real interval_minutes
+// value.  Fixed to Option<i64> to match the actual column type.
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CheckinConfig {
     pub interval_minutes: i64,
     pub checkin_type: String,
-    pub quiet_hours_start: Option<String>, // "23:00"
-    pub quiet_hours_end: Option<String>,   // "07:00"
+    /// Hour at which quiet hours begin (0–23). Stored as integer in DB.
+    pub quiet_hours_start: Option<i64>,
+    /// Hour at which quiet hours end (0–23). Stored as integer in DB.
+    pub quiet_hours_end: Option<i64>,
     pub telegram_enabled: bool,
 }
 
@@ -28,8 +36,8 @@ impl Default for CheckinConfig {
         Self {
             interval_minutes: 60,
             checkin_type: "brief".to_string(),
-            quiet_hours_start: Some("23:00".to_string()),
-            quiet_hours_end: Some("07:00".to_string()),
+            quiet_hours_start: Some(23),
+            quiet_hours_end: Some(7),
             telegram_enabled: true,
         }
     }

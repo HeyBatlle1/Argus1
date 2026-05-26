@@ -40,7 +40,7 @@ use argus_core::shell::ShellPolicy;
 use argus_core::supabase::{CheckinLogEntry, DiscoursePost, SupabaseClient};
 use argus_core::tools::MemoryBackend;
 use argus_core::run_agent_turn;
-use chrono::{Datelike, Local, NaiveDate, NaiveTime, Timelike};
+use chrono::{Datelike, Local, NaiveDate, Timelike};
 use reqwest::Client;
 use tokio::time::{sleep, Duration};
 
@@ -147,27 +147,15 @@ async fn run_checkin_loop(
 }
 
 fn in_quiet_hours(config: &argus_core::supabase::CheckinConfig) -> bool {
-    let now = Local::now().time();
-    let start_str = config.quiet_hours_start.as_deref().unwrap_or("23:00");
-    let end_str = config.quiet_hours_end.as_deref().unwrap_or("07:00");
+    let now_h = Local::now().hour();
+    let start_h = config.quiet_hours_start.unwrap_or(23) as u32;
+    let end_h   = config.quiet_hours_end.unwrap_or(7) as u32;
 
-    let parse = |s: &str| -> Option<NaiveTime> {
-        let parts: Vec<&str> = s.splitn(2, ':').collect();
-        if parts.len() != 2 { return None; }
-        let h: u32 = parts[0].parse().ok()?;
-        let m: u32 = parts[1].parse().ok()?;
-        NaiveTime::from_hms_opt(h, m, 0)
-    };
-
-    let (start, end) = match (parse(start_str), parse(end_str)) {
-        (Some(s), Some(e)) => (s, e),
-        _ => return false,
-    };
-
-    if start > end {
-        now >= start || now < end
+    // start_h > end_h means the window spans midnight (e.g. 23 → 07)
+    if start_h > end_h {
+        now_h >= start_h || now_h < end_h
     } else {
-        now >= start && now < end
+        now_h >= start_h && now_h < end_h
     }
 }
 
