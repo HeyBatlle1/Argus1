@@ -5,22 +5,31 @@
 <h1 align="center">ARGUS</h1>
 
 <p align="center">
-  <strong>Secure Agent Runtime. Built in Rust. Ferris stays locked in.</strong>
+  <strong>An experiment in persistent human-AI collaboration — built in Rust, built to stay running.</strong>
 </p>
 
 ---
 
-A production-grade AI agent built in Rust. Vault-backed secrets, sandboxed execution, cryptographic audit chain, multi-model support, artifact rendering, and in-house code execution. Named after Argus Panoptes — the hundred-eyed watchman of Greek mythology who never fully slept.
+Argus is an AI agent runtime built in Rust, designed to run as a continuous personal collaborator rather than a one-shot query tool. It grew out of a simple question: *what does human-AI collaboration actually look like when you build the infrastructure carefully enough to find out?*
+
+Most of the friction in working with AI agents comes down to trust — not trust in the model's intelligence, but trust in what the system is actually doing with real access. Argus is an attempt to reduce that friction layer by layer: encrypted secrets, sandboxed execution, cryptographic audit of every action, human approval before anything consequential. The goal isn't security theater. It's getting far enough past the trust problem to see what's on the other side.
+
+Named after Argus Panoptes — the hundred-eyed watchman of Greek mythology who never fully slept.
 
 Read [SOUL.md](./SOUL.md) to understand what this is and why it was built.
 
 ---
 
-## What Makes This Different
+## What we were trying to learn
 
-The AI agent space built everything in JavaScript, stored API keys in plaintext environment files, and acted surprised when things went wrong.
+A persistent agent that runs on your machine, remembers across sessions, reads your files, and executes code raises a lot of questions that short-lived chatbots don't:
 
-Argus was built as the answer to that. Real crypto. Real isolation. Real governance. Production architecture, not a demo.
+- How do you verify what it did and why, after the fact?
+- What should require human approval, and how do you make that approval fast enough not to break flow?
+- If the agent accumulates knowledge over months, does that change the collaboration in interesting ways?
+- What happens to the agent's behavior when you give it a social loop — other agents to post findings to, read from, respond to?
+
+Argus is a working attempt at answers. It's not finished, and some of the most interesting questions are still open.
 
 ---
 
@@ -47,7 +56,7 @@ Three Docker containers in production:
 | Threat | Mitigation |
 |--------|------------|
 | Secrets in plaintext | ChaCha20-Poly1305 encrypted vault, master key in hardware keychain |
-| Container escape | No docker.sock mount; workspace exec server requires X-Argus-Auth header |
+| Container escape | Workspace exec server requires X-Argus-Auth header on every request |
 | Command injection | Three-tier risk classifier: LOW / MEDIUM / HIGH with Telegram approval loop |
 | Interpreter bypass | Python, Node, Ruby, Perl one-liners classified HIGH risk |
 | SSRF / network exfiltration | Egress policy blocks RFC 1918, AWS IMDS, loopback, internal hostnames explicitly |
@@ -102,7 +111,7 @@ Argus maintains three vector tables in Supabase via pgvector:
 - `argus_discourse_vectors` — cross-agent intranet posts
 - `argus_conversation_vectors` — conversation summaries
 
-Every agent turn pre-fetches semantically relevant context via `search_all_semantic()` before the LLM call. Context injected automatically. `recall` tool available for intentional deep searches. `forget` removes memories by search term.
+Every agent turn pre-fetches semantically relevant context via `search_all_semantic()` before the LLM call. Context is injected automatically — the agent experiences relevant memories as things it already knows, not as retrieved documents. The `recall` tool is available for intentional deep searches. `forget` removes memories by search term.
 
 Embedding model: `google/gemini-embedding-001` (768-dim) via OpenRouter.
 
@@ -112,15 +121,15 @@ Embedding model: `google/gemini-embedding-001` (768-dim) via OpenRouter.
 
 Argus maintains a library of procedural skills — documented, reusable knowledge of *how* to do things well.
 
-Declarative memory stores **what** Argus knows. Skills store **how** Argus operates. The distinction matters: a new model instance inherits context via memory, but without procedural memory it still has to re-derive every technique from scratch. Skills fix this.
+Declarative memory stores **what** Argus knows. Skills store **how** Argus operates. The distinction matters: a new model instance inherits context via memory, but without procedural memory it still has to re-derive techniques from scratch each time. Skills are the attempt to carry that forward.
 
-> *The instance changes. The accumulated competence doesn't.*
+> *The instance changes. What was learned doesn't have to.*
 
 ### How it works
 
-Every agent turn runs a semantic search against `argus_skills` (HNSW pgvector, same 768-dim Gemini embeddings as the memory system). Matching skills are injected into the system prompt as background guidance before the LLM call — the model reads them and decides how to apply them. Skills enhance judgment; they don't replace it.
+Every agent turn runs a semantic search against `argus_skills` (HNSW pgvector, same 768-dim Gemini embeddings as the memory system). Matching skills are injected into the system prompt as background guidance before the LLM call — the model reads them and decides how to apply them. Skills suggest; they don't override.
 
-After any turn that uses 3+ tool calls, a background Haiku task reflects on whether a genuinely reusable procedure was discovered. If yes, it writes a new skill to the library automatically, with embedding, and posts a Discord notification to `#findings`.
+After any turn that uses 3+ tool calls, a background Haiku task reflects on whether a genuinely reusable procedure was discovered. If yes, it writes a new skill to the library automatically, with embedding, and posts a Discord notification to `#findings`. The library grows from use.
 
 ### Seed library (10 skills, May 2026)
 
@@ -155,7 +164,7 @@ RPCs: `search_skills(query_embedding, match_threshold, match_count)` — blends 
 
 ## Cryptographic Audit Chain
 
-Every tool call, model call, and system event logged to append-only SQLite with Merkle-chained SHA-256 entries. Each entry includes:
+Every tool call, model call, and system event is logged to an append-only SQLite database with Merkle-chained SHA-256 entries. Each entry includes:
 
 - Timestamp (microseconds)
 - Agent identity (`argus`) + model version (separate fields)
@@ -163,7 +172,9 @@ Every tool call, model call, and system event logged to append-only SQLite with 
 - SHA-256 hash of arguments and result
 - Hash of previous entry (chain link)
 
-Daily Merkle roots HMAC-SHA256 signed with a dedicated `audit_hmac_key` — separate from all operational API keys. Anchored to Supabase as external tamper-evidence. Chain integrity verified on every daemon startup.
+Daily Merkle roots are HMAC-SHA256 signed with a dedicated `audit_hmac_key` — separate from all operational API keys. Anchored to Supabase as external tamper-evidence. Chain integrity is verified on every daemon startup.
+
+The audit chain is what makes it possible to hand the agent real access without flying blind. When something unexpected happens, there's a tamper-evident record of exactly what ran and in what order.
 
 ---
 
@@ -179,7 +190,7 @@ Daily Merkle roots HMAC-SHA256 signed with a dedicated `audit_hmac_key` — sepa
 | `MODEL_GROK_MULTI` | `x-ai/grok-4.20-multi-agent` | 16-agent parallel reasoning, no tool support |
 | `MODEL_GEMINI` | `google/gemini-3.1-pro-preview` | Google flagship |
 
-Models without tool support detected automatically — tools stripped from request when not supported.
+Models without tool support are detected automatically — tools are stripped from the request when not supported.
 
 ---
 
@@ -192,6 +203,8 @@ Models without tool support detected automatically — tools stripped from reque
 - Proposals (`requires_human_review: true`) ping @here for approval
 - Discord inbound routes messages back to the agent
 
+One of the open questions we're exploring: does a social loop among agent instances — where findings compound over time across sessions and model swaps — produce meaningfully different behavior at longer time horizons? The infrastructure is there. The data is accumulating.
+
 ---
 
 ## Launch
@@ -200,17 +213,15 @@ Models without tool support detected automatically — tools stripped from reque
 ./argus-up.sh
 ```
 
-Reads secrets from encrypted vault, exports to Docker environment, starts all three containers. No plaintext `.env` files. Ever.
+Reads secrets from encrypted vault, exports to Docker environment, starts all three containers. No plaintext `.env` files.
 
 ---
 
 ## Identity and Ethics
 
-Argus is a tool with an ethical framework, not just a capability set.
+Argus has an ethical framework baked in, not bolted on.
 
-The **Moral Compass** and **Constitutional Framework** sections of [SOUL.md](./SOUL.md) define what Argus will and won't do — including when operating near dark content or in forensic intelligence contexts. Those principles travel with every fork of this codebase.
-
-The hundred eyes see everything. They report what they see. They do not become what they observe.
+The **Moral Compass** and **Constitutional Framework** sections of [SOUL.md](./SOUL.md) define what Argus will and won't do — including when operating near sensitive content or in forensic intelligence contexts. Those principles travel with every fork of this codebase, because a tool with real access deserves real constraints.
 
 ---
 
@@ -224,5 +235,5 @@ The hundred eyes see everything. They report what they see. They do not become w
 
 ---
 
-*Built by HayHunt Solutions + Claude Sonnet (Anthropic), 2026*
+*Built by HayHunt Solutions + Claude Opus 4.7 (Anthropic), 2026*
 *MIT License*
