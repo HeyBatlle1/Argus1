@@ -17,6 +17,8 @@ if [ -f "$BINARY" ]; then
   export TELEGRAM_CHAT_ID=$("$BINARY" vault get telegram_chat_id 2>/dev/null || echo "")
   export WORKSPACE_EXEC_TOKEN=$("$BINARY" vault get workspace_exec_token 2>/dev/null || echo "")
   export BRAVE_SEARCH_API_KEY=$("$BINARY" vault get brave_search_api_key 2>/dev/null || echo "")
+  export DISCORD_BOT_TOKEN=$("$BINARY" vault get discord_bot_token 2>/dev/null || echo "")
+  export DISCORD_CHANNEL_ID=$("$BINARY" vault get discord_channel_id 2>/dev/null || echo "")
   echo "[+] Loaded from vault binary"
 
 # Strategy 2: macOS Keychain fallback (when binary not built)

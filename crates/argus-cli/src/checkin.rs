@@ -221,8 +221,8 @@ async fn run_agent_checkin(
             let mut block = String::from("RECENT INTRANET ACTIVITY (last 5 posts):\n");
             for post in &posts {
                 let ts = post.created_at.as_deref().unwrap_or("unknown time");
-                let snippet = if post.content.len() > 200 {
-                    format!("{}…", &post.content[..200])
+                let snippet = if post.content.chars().count() > 200 {
+                    format!("{}…", post.content.chars().take(200).collect::<String>())
                 } else {
                     post.content.clone()
                 };

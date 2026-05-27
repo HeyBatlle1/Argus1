@@ -98,7 +98,7 @@ impl ArgusBot {
             &self.client,
             |event| match event {
                 AgentEvent::ToolCall { name, preview, .. } => {
-                    let short = if preview.len() > 80 { format!("{}...", &preview[..80]) } else { preview };
+                    let short = if preview.chars().count() > 80 { format!("{}...", preview.chars().take(80).collect::<String>()) } else { preview };
                     tool_log.push(format!("[tool] {}: {}", name, short));
                 }
                 AgentEvent::Response(text) => { response_text = text; }
@@ -133,7 +133,7 @@ impl ArgusBot {
                 tokio::spawn(async move {
                     // Truncate to a reasonable intranet post length
                     let content = if summary.len() > 500 {
-                        format!("{}...", &summary[..497])
+                        format!("{}...", summary.chars().take(497).collect::<String>())
                     } else {
                         summary
                     };

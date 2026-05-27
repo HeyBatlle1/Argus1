@@ -114,11 +114,30 @@ export interface McpServer {
   toolCount: number;
 }
 
+export interface Conversation {
+  id: string;
+  title: string;
+  surface: string;
+  model: string | null;
+  messageCount: number;
+  startedAt: string;
+  lastActiveAt: string;
+}
+
+export interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  model?: string;
+}
+
 // WebSocket protocol
 export type ClientMessage =
   | { type: 'user_message'; content: string }
   | { type: 'switch_model'; model: ModelId }
-  | { type: 'cancel' };
+  | { type: 'cancel' }
+  | { type: 'new_conversation' }
+  | { type: 'load_conversation'; id: string }
+  | { type: 'list_conversations' };
 
 export type ServerMessage =
   | { type: 'thinking' }
@@ -129,4 +148,7 @@ export type ServerMessage =
   | { type: 'response_complete'; content: string }
   | { type: 'error'; message: string }
   | { type: 'status'; eye_state: EyeState; model: ModelId }
-  | { type: 'memory_update'; memories: Memory[] };
+  | { type: 'memory_update'; memories: Memory[] }
+  | { type: 'conversation_history'; id: string; messages: HistoryMessage[] }
+  | { type: 'conversations_list'; conversations: Conversation[] }
+  | { type: 'conversation_started'; id: string; title: string };

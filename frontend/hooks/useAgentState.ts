@@ -5,6 +5,7 @@ import {
   EyeState, ModelId, AccessTier,
   Message, Tool, ToolCall,
   Memory, Curiosity, InnerTruth, PartnershipDynamic, Breakthrough,
+  Conversation,
   ServerMessage,
 } from '@/lib/types';
 import { ArgusConnection } from '@/lib/connection';
@@ -102,6 +103,12 @@ interface AgentStore {
   vaultKeys: string[];
   mcpServers: string[];
 
+  // Conversation history
+  conversations: Conversation[];
+  currentConversationId: string | null;
+  currentConversationTitle: string;
+  showConversationList: boolean;
+
   // Internal
   _ws: ArgusConnection | null;
 
@@ -110,6 +117,9 @@ interface AgentStore {
   switchModel: (model: ModelId) => void;
   setEyeState: (state: EyeState) => void;
   initConnection: () => void;
+  newConversation: () => void;
+  loadConversation: (id: string) => void;
+  toggleConversationList: () => void;
   _handleServerMessage: (msg: ServerMessage) => void;
 }
 
@@ -144,6 +154,11 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   vaultKeys: [],
   mcpServers: [],
+
+  conversations: [],
+  currentConversationId: null,
+  currentConversationTitle: '',
+  showConversationList: false,
 
   _ws: null,
 
@@ -256,6 +271,31 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         set({ memories: msg.memories });
         break;
 
+      case 'conversations_list':
+        set({ conversations: msg.conversations });
+        break;
+
+      case 'conversation_started':
+        set({
+          currentConversationId: msg.id,
+          currentConversationTitle: msg.title,
+          messages: [],
+          showConversationList: false,
+        });
+        break;
+
+      case 'conversation_history': {
+        // Rebuild Message objects from persisted role/content pairs.
+        const loaded: Message[] = msg.messages.map((m, i) => ({
+          id: `hist-${msg.id}-${i}`,
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          timestamp: new Date(),
+        }));
+        set({ currentConversationId: msg.id, messages: loaded });
+        break;
+      }
+
       case 'error':
         set((prev) => ({
           eyeState: 'watching',
@@ -318,4 +358,16 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
 
   setEyeState: (state: EyeState) => set({ eyeState: state }),
+
+  newConversation: () => {
+    get()._ws?.send({ type: 'new_conversation' });
+  },
+
+  loadConversation: (id: string) => {
+    get()._ws?.send({ type: 'load_conversation', id });
+  },
+
+  toggleConversationList: () => {
+    set((prev) => ({ showConversationList: !prev.showConversationList }));
+  },
 }));

@@ -110,7 +110,7 @@ fn format_history_block(history: &[ConversationMessage]) -> Option<String> {
 
         // Truncate long messages for the context block
         let body = if msg.content.len() > 300 {
-            format!("{}...", &msg.content[..297])
+            format!("{}...", msg.content.chars().take(297).collect::<String>())
         } else {
             msg.content.clone()
         };
@@ -172,7 +172,7 @@ fn sanitize_tool_name(name: &str) -> String {
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
         .collect();
-    if clean.len() > 64 { clean[..64].to_string() } else { clean }
+    if clean.chars().count() > 64 { clean.chars().take(64).collect() } else { clean }
 }
 
 #[derive(Debug, Clone)]
@@ -716,8 +716,8 @@ fn maybe_reflect_on_skill(
     let Some(sc) = skills else { return };
 
     tokio::spawn(async move {
-        let response_preview = if response.len() > 400 {
-            format!("{}...", &response[..400])
+        let response_preview = if response.chars().count() > 400 {
+            format!("{}...", response.chars().take(400).collect::<String>())
         } else {
             response.clone()
         };

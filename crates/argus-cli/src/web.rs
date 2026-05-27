@@ -18,7 +18,7 @@ use tower_http::cors::{Any, CorsLayer};
 
 use argus_core::{AgentConfig, AgentEvent, ConversationMessage, EmbeddingClient, McpClient, MemoryBackend, ShellPolicy, MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS, MODEL_GROK, MODEL_GROK_FAST, MODEL_GROK_MULTI};
 use argus_core::shell::PermissionPrompter;
-use argus_memory::sqlite::SqliteMemory;
+use argus_memory::sqlite::{ConversationMeta, SqliteMemory};
 
 // ─── WebSocket message types (mirrors TypeScript protocol) ─────────────────
 
@@ -28,6 +28,9 @@ enum ClientMessage {
     UserMessage { content: String },
     SwitchModel { model: String },
     Cancel,
+    NewConversation,
+    LoadConversation { id: String },
+    ListConversations,
 }
 
 /// Memory record serialized to match the frontend Memory type
@@ -40,6 +43,45 @@ struct MemoryPayload {
     importance: f64,
     #[serde(rename = "createdAt")]
     created_at: String,
+}
+
+/// A single message as sent to the frontend for history replay.
+#[derive(Debug, Serialize, Clone)]
+struct HistoryMessagePayload {
+    role: String,
+    content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+}
+
+/// Conversation metadata as sent to the frontend.
+#[derive(Debug, Serialize, Clone)]
+struct ConversationPayload {
+    id: String,
+    title: String,
+    surface: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(rename = "messageCount")]
+    message_count: i64,
+    #[serde(rename = "startedAt")]
+    started_at: String,
+    #[serde(rename = "lastActiveAt")]
+    last_active_at: String,
+}
+
+impl From<ConversationMeta> for ConversationPayload {
+    fn from(m: ConversationMeta) -> Self {
+        Self {
+            id: m.id,
+            title: m.title,
+            surface: m.surface,
+            model: m.model,
+            message_count: m.message_count,
+            started_at: m.started_at,
+            last_active_at: m.last_active_at,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -78,6 +120,20 @@ enum ServerMessage {
     MemoryUpdate {
         memories: Vec<MemoryPayload>,
     },
+    /// Sent on connect (and after LoadConversation) to replay prior messages.
+    ConversationHistory {
+        id: String,
+        messages: Vec<HistoryMessagePayload>,
+    },
+    /// Full list of past conversations for the sidebar.
+    ConversationsList {
+        conversations: Vec<ConversationPayload>,
+    },
+    /// Confirms a new or loaded conversation is active.
+    ConversationStarted {
+        id: String,
+        title: String,
+    },
 }
 
 // ─── Per-connection state ──────────────────────────────────────────────────
@@ -89,6 +145,8 @@ struct ConnectionState {
     memory: SqliteMemory,
     mcp: McpClient,
     shell_policy: ShellPolicy,
+    conversation_id: String,
+    conversation_title: String,
 }
 
 impl ConnectionState {
@@ -112,16 +170,33 @@ impl ConnectionState {
         let memory = SqliteMemory::open_default()
             .map_err(|e| anyhow::anyhow!("Memory init failed: {}", e))?;
 
+        // Restore the most recent web conversation, or start fresh.
+        let (conversation_id, conversation_title, history) =
+            match memory.latest_conversation() {
+                Ok(Some(meta)) if meta.surface == "web" => {
+                    let hist = memory.load_history_str(&meta.id).unwrap_or_default();
+                    (meta.id, meta.title, hist)
+                }
+                _ => {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    let title = "New Conversation".to_string();
+                    let _ = memory.upsert_conversation(&id, &title, "web", None, 0);
+                    (id, title, Vec::new())
+                }
+            };
+
         let mut mcp = McpClient::new();
         let _ = mcp.connect_all();
 
         Ok(Self {
             config,
-            history: Vec::new(),
+            history,
             client: reqwest::Client::new(),
             memory,
             mcp,
             shell_policy: ShellPolicy::default(),
+            conversation_id,
+            conversation_title,
         })
     }
 
@@ -413,6 +488,24 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             mcp_servers,
         });
         let _ = tx.send(build_memory_update(&c.memory));
+
+        // Replay the restored conversation history so the UI is not blank on reconnect.
+        if !c.history.is_empty() {
+            let messages = c.history.iter().map(|m| HistoryMessagePayload {
+                role: m.role.clone(),
+                content: m.content.clone(),
+                model: m.model.clone(),
+            }).collect();
+            let _ = tx.send(ServerMessage::ConversationHistory {
+                id: c.conversation_id.clone(),
+                messages,
+            });
+        }
+
+        // Send the conversations list for the sidebar.
+        let conversations = c.memory.list_conversations(30).unwrap_or_default()
+            .into_iter().map(ConversationPayload::from).collect();
+        let _ = tx.send(ServerMessage::ConversationsList { conversations });
     }
 
     let mut ws_rx = ws_rx;
@@ -454,6 +547,45 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                         c.current_frontend_model()
                     },
                 });
+            }
+
+            ClientMessage::NewConversation => {
+                let mut c = conn.lock().await;
+                let new_id = uuid::Uuid::new_v4().to_string();
+                let title = "New Conversation".to_string();
+                let _ = c.memory.upsert_conversation(&new_id, &title, "web", Some(&c.config.model), 0);
+                c.conversation_id = new_id.clone();
+                c.conversation_title = title.clone();
+                c.history.clear();
+                let conversations = c.memory.list_conversations(30).unwrap_or_default()
+                    .into_iter().map(ConversationPayload::from).collect();
+                let _ = tx.send(ServerMessage::ConversationStarted { id: new_id, title });
+                let _ = tx.send(ServerMessage::ConversationsList { conversations });
+            }
+
+            ClientMessage::LoadConversation { id } => {
+                let mut c = conn.lock().await;
+                let history = c.memory.load_history_str(&id).unwrap_or_default();
+                let meta = c.memory.list_conversations(30).unwrap_or_default()
+                    .into_iter().find(|m| m.id == id);
+                let title = meta.map(|m| m.title).unwrap_or_else(|| "Conversation".to_string());
+                c.conversation_id = id.clone();
+                c.conversation_title = title.clone();
+                c.history = history.clone();
+                let messages = history.iter().map(|m| HistoryMessagePayload {
+                    role: m.role.clone(),
+                    content: m.content.clone(),
+                    model: m.model.clone(),
+                }).collect();
+                let _ = tx.send(ServerMessage::ConversationStarted { id: id.clone(), title });
+                let _ = tx.send(ServerMessage::ConversationHistory { id, messages });
+            }
+
+            ClientMessage::ListConversations => {
+                let c = conn.lock().await;
+                let conversations = c.memory.list_conversations(30).unwrap_or_default()
+                    .into_iter().map(ConversationPayload::from).collect();
+                let _ = tx.send(ServerMessage::ConversationsList { conversations });
             }
         }
     }
@@ -561,7 +693,7 @@ async fn handle_user_message(
                 let context = Some(format!("Web UI turn — {} tool calls", tool_call_count));
                 tokio::spawn(async move {
                     let content = if summary.len() > 500 {
-                        format!("{}...", &summary[..497])
+                        format!("{}...", summary.chars().take(497).collect::<String>())
                     } else {
                         summary
                     };
@@ -588,6 +720,15 @@ async fn handle_user_message(
                     let drain = c.history.len() - 40;
                     c.history.drain(0..drain);
                 }
+                // Auto-title from first user message.
+                if c.conversation_title == "New Conversation" && !c.history.is_empty() {
+                    let first = c.history[0].content.chars().take(60).collect::<String>();
+                    c.conversation_title = if first.len() == 60 {
+                        format!("{}…", first)
+                    } else {
+                        first
+                    };
+                }
                 Ok(text)
             }
             Err(e) => {
@@ -605,6 +746,15 @@ async fn handle_user_message(
             let _ = tx.send(ServerMessage::ResponseComplete { content });
             let (frontend_model, memory_update) = {
                 let c = conn.lock().await;
+                // Persist history and metadata after every successful turn.
+                let _ = c.memory.save_history_str(&c.conversation_id, &c.history);
+                let _ = c.memory.upsert_conversation(
+                    &c.conversation_id,
+                    &c.conversation_title,
+                    "web",
+                    Some(&c.config.model),
+                    c.history.len() / 2,
+                );
                 (c.current_frontend_model(), build_memory_update(&c.memory))
             };
             let _ = tx.send(memory_update);

@@ -300,7 +300,7 @@ mod full {
         if s.len() <= 1990 {
             s.to_string()
         } else {
-            format!("{}…", &s[..1987])
+            format!("{}…", s.chars().take(1987).collect::<String>())
         }
     }
 
