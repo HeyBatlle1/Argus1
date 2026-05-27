@@ -349,7 +349,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       ],
     }));
 
-    get()._ws!.send({ type: 'user_message', content });
+    get()._ws?.send({ type: 'user_message', content });
   },
 
   switchModel: (model: ModelId) => {

@@ -202,7 +202,7 @@ pub fn builtin_tool_schemas() -> Vec<Value> {
                 }
             }
         }
-    ]).as_array().unwrap().clone()
+    ]).as_array().expect("tool schema is a literal JSON array").clone()
 }
 
 pub async fn execute_builtin(
@@ -267,8 +267,8 @@ fn tool_read_file(args: &Value) -> String {
     let path = args["path"].as_str().unwrap_or("");
     match std::fs::read_to_string(path) {
         Ok(content) => {
-            if content.len() > MAX_FILE_CHARS {
-                format!("{}...\n[truncated, {} bytes total]", &content[..MAX_FILE_CHARS], content.len())
+            if content.chars().count() > MAX_FILE_CHARS {
+                format!("{}...\n[truncated, {} bytes total]", content.chars().take(MAX_FILE_CHARS).collect::<String>(), content.len())
             } else {
                 content
             }
@@ -505,7 +505,8 @@ async fn brave_search(query: &str, client: &reqwest::Client, api_key: &str) -> S
             };
             let json: serde_json::Value = match serde_json::from_str(&text) {
                 Err(e) => {
-                    let preview = if text.len() > 200 { &text[..200] } else { &text };
+                    let preview: String = text.chars().take(200).collect();
+                    let preview = &preview;
                     return format!("Brave Search parse error: {} — raw: {}", e, preview);
                 }
                 Ok(j) => j,
@@ -724,8 +725,8 @@ async fn tool_http_request(args: &Value, client: &reqwest::Client) -> String {
             match resp.text().await {
                 Err(e) => format!("HTTP {} (body read error: {})", status, e),
                 Ok(body) => {
-                    let truncated = if body.len() > MAX_FILE_CHARS {
-                        format!("{}...\n[truncated, {} bytes total]", &body[..MAX_FILE_CHARS], body.len())
+                    let truncated = if body.chars().count() > MAX_FILE_CHARS {
+                        format!("{}...\n[truncated, {} bytes total]", body.chars().take(MAX_FILE_CHARS).collect::<String>(), body.len())
                     } else {
                         body
                     };

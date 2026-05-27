@@ -721,13 +721,15 @@ async fn handle_user_message(
                     c.history.drain(0..drain);
                 }
                 // Auto-title from first user message.
-                if c.conversation_title == "New Conversation" && !c.history.is_empty() {
-                    let first = c.history[0].content.chars().take(60).collect::<String>();
+                if c.conversation_title == "New Conversation" {
+                    if let Some(first_msg) = c.history.first() {
+                    let first = first_msg.content.chars().take(60).collect::<String>();
                     c.conversation_title = if first.len() == 60 {
                         format!("{}…", first)
                     } else {
                         first
                     };
+                    }
                 }
                 Ok(text)
             }
