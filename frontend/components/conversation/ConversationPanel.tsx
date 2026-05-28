@@ -3,18 +3,17 @@
 import { useAgentStore } from '@/hooks/useAgentState';
 import { MessageList } from './MessageList';
 import { InputArea } from './InputArea';
-import { ConversationHistory } from './ConversationHistory';
 import { Artifact } from '@/lib/types';
+import { Plus } from 'lucide-react';
 
 interface Props {
   onOpenArtifact: (artifacts: Artifact[], index: number) => void;
 }
 
 export function ConversationPanel({ onOpenArtifact }: Props) {
-  const showList = useAgentStore((s) => s.showConversationList);
   const title = useAgentStore((s) => s.currentConversationTitle);
-  const toggleList = useAgentStore((s) => s.toggleConversationList);
   const newConversation = useAgentStore((s) => s.newConversation);
+  const isStreaming = useAgentStore((s) => s.isStreaming);
 
   return (
     <div
@@ -30,10 +29,10 @@ export function ConversationPanel({ onOpenArtifact }: Props) {
           <span className="text-[9px] font-mono tracking-widest uppercase text-argus-amber flex-shrink-0">
             CONVERSATION
           </span>
-          {title && !showList && (
+          {title && (
             <span
               className="text-[9px] font-mono truncate"
-              style={{ color: '#5a5a7a', maxWidth: '200px' }}
+              style={{ color: '#3a3a5a', maxWidth: '260px' }}
               title={title}
             >
               {title}
@@ -41,56 +40,38 @@ export function ConversationPanel({ onOpenArtifact }: Props) {
           )}
         </div>
 
-        <div className="flex items-center gap-1 flex-shrink-0">
-          {/* History toggle */}
-          <button
-            onClick={toggleList}
-            className="text-[9px] font-mono px-2 py-0.5 rounded transition-colors"
-            style={{
-              background: showList ? 'rgba(255,176,0,0.15)' : 'transparent',
-              border: showList ? '1px solid rgba(255,176,0,0.4)' : '1px solid transparent',
-              color: showList ? '#ffb000' : '#5a5a7a',
-            }}
-            title="Browse past conversations"
-          >
-            HISTORY
-          </button>
-
-          {/* New conversation */}
-          {!showList && (
-            <button
-              onClick={newConversation}
-              className="text-[9px] font-mono px-2 py-0.5 rounded transition-colors"
-              style={{
-                background: 'transparent',
-                border: '1px solid transparent',
-                color: '#5a5a7a',
-              }}
-              onMouseEnter={(e) => {
-                (e.target as HTMLButtonElement).style.color = '#ffb000';
-                (e.target as HTMLButtonElement).style.borderColor = 'rgba(255,176,0,0.3)';
-              }}
-              onMouseLeave={(e) => {
-                (e.target as HTMLButtonElement).style.color = '#5a5a7a';
-                (e.target as HTMLButtonElement).style.borderColor = 'transparent';
-              }}
-              title="Start a new conversation"
-            >
-              + NEW
-            </button>
-          )}
-        </div>
+        <button
+          onClick={newConversation}
+          disabled={isStreaming}
+          className="flex items-center gap-1 text-[9px] font-mono px-2 py-1 rounded transition-colors flex-shrink-0"
+          style={{
+            border: '1px solid transparent',
+            color: '#5a5a7a',
+            background: 'transparent',
+            opacity: isStreaming ? 0.4 : 1,
+            cursor: isStreaming ? 'not-allowed' : 'pointer',
+          }}
+          onMouseEnter={(e) => {
+            if (!isStreaming) {
+              (e.currentTarget as HTMLButtonElement).style.color = '#ffb000';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,176,0,0.3)';
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,176,0,0.06)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.color = '#5a5a7a';
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent';
+            (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+          }}
+          title="New conversation"
+        >
+          <Plus size={10} />
+          NEW
+        </button>
       </div>
 
-      {/* Body — either conversation history list or active chat */}
-      {showList ? (
-        <ConversationHistory />
-      ) : (
-        <>
-          <MessageList onOpenArtifact={onOpenArtifact} />
-          <InputArea />
-        </>
-      )}
+      <MessageList onOpenArtifact={onOpenArtifact} />
+      <InputArea />
     </div>
   );
 }

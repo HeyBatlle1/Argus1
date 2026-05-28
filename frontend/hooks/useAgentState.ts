@@ -5,7 +5,7 @@ import {
   EyeState, ModelId, AccessTier,
   Message, Tool, ToolCall,
   Memory, Curiosity, InnerTruth, PartnershipDynamic, Breakthrough,
-  Conversation,
+  Conversation, Skill, ActivityEntry,
   ServerMessage,
 } from '@/lib/types';
 import { ArgusConnection } from '@/lib/connection';
@@ -107,7 +107,10 @@ interface AgentStore {
   conversations: Conversation[];
   currentConversationId: string | null;
   currentConversationTitle: string;
-  showConversationList: boolean;
+
+  // Skills + Activity
+  skills: Skill[];
+  activity: ActivityEntry[];
 
   // Internal
   _ws: ArgusConnection | null;
@@ -119,7 +122,6 @@ interface AgentStore {
   initConnection: () => void;
   newConversation: () => void;
   loadConversation: (id: string) => void;
-  toggleConversationList: () => void;
   _handleServerMessage: (msg: ServerMessage) => void;
 }
 
@@ -158,7 +160,9 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   conversations: [],
   currentConversationId: null,
   currentConversationTitle: '',
-  showConversationList: false,
+
+  skills: [],
+  activity: [],
 
   _ws: null,
 
@@ -179,26 +183,36 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         break;
 
       case 'tool_call': {
+        // Rust sends call_id (snake_case); TypeScript declared callId — handle both
+        const callId = (msg as any).call_id ?? (msg as any).callId ?? 'unknown';
         const tc: ToolCall = {
-          id: msg.callId,
+          id: callId,
           name: msg.name,
           args: msg.args,
           state: 'executing',
           startedAt: new Date(),
         };
+        const now = new Date();
+        const entry: ActivityEntry = {
+          id: 'act-' + callId,
+          kind: 'tool',
+          label: msg.name,
+          ts: now.toISOString(),
+        };
         set((prev) => ({
           eyeState: 'executing',
           activeToolCalls: [...prev.activeToolCalls, tc],
+          activity: [entry, ...prev.activity].slice(0, 50),
           tools: prev.tools.map((t) =>
             t.name === msg.name ? { ...t, state: 'active' as const } : t
           ),
           messages: [
             ...prev.messages,
             {
-              id: 'tc-' + msg.callId,
+              id: 'tc-' + callId,
               role: 'assistant' as const,
               content: '',
-              timestamp: new Date(),
+              timestamp: now,
               toolCalls: [tc],
             },
           ],
@@ -208,18 +222,19 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
       case 'tool_result': {
         const now = new Date();
+        const callId = (msg as any).call_id ?? (msg as any).callId ?? 'unknown';
         set((prev) => ({
           activeToolCalls: prev.activeToolCalls.map((tc) =>
-            tc.id === msg.callId
+            tc.id === callId
               ? { ...tc, result: msg.result, success: msg.success, state: 'complete' as const, completedAt: now }
               : tc
           ),
           messages: prev.messages.map((m) => {
-            if (!m.toolCalls?.some((tc) => tc.id === msg.callId)) return m;
+            if (!m.toolCalls?.some((tc) => tc.id === callId)) return m;
             return {
               ...m,
               toolCalls: m.toolCalls.map((tc) =>
-                tc.id === msg.callId
+                tc.id === callId
                   ? { ...tc, result: msg.result, success: msg.success, state: 'complete' as const, completedAt: now }
                   : tc
               ),
@@ -271,6 +286,14 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         set({ memories: msg.memories });
         break;
 
+      case 'skills_update':
+        set({ skills: msg.skills });
+        break;
+
+      case 'activity_update':
+        set((prev) => ({ activity: [...msg.entries, ...prev.activity].slice(0, 50) }));
+        break;
+
       case 'conversations_list':
         set({ conversations: msg.conversations });
         break;
@@ -280,7 +303,6 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           currentConversationId: msg.id,
           currentConversationTitle: msg.title,
           messages: [],
-          showConversationList: false,
         });
         break;
 
@@ -365,9 +387,5 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   loadConversation: (id: string) => {
     get()._ws?.send({ type: 'load_conversation', id });
-  },
-
-  toggleConversationList: () => {
-    set((prev) => ({ showConversationList: !prev.showConversationList }));
   },
 }));

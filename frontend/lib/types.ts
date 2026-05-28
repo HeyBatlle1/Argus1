@@ -108,6 +108,23 @@ export interface VaultStatus {
   keys: string[];
 }
 
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  toolsUsed: string[];
+  useCount: number;
+  learnedAt: string;
+}
+
+export interface ActivityEntry {
+  id: string;
+  kind: 'tool' | 'memory' | 'discord' | 'audit';
+  label: string;
+  detail?: string;
+  ts: string;
+}
+
 export interface McpServer {
   name: string;
   connected: boolean;
@@ -151,4 +168,6 @@ export type ServerMessage =
   | { type: 'memory_update'; memories: Memory[] }
   | { type: 'conversation_history'; id: string; messages: HistoryMessage[] }
   | { type: 'conversations_list'; conversations: Conversation[] }
-  | { type: 'conversation_started'; id: string; title: string };
+  | { type: 'conversation_started'; id: string; title: string }
+  | { type: 'skills_update'; skills: Skill[] }
+  | { type: 'activity_update'; entries: ActivityEntry[] };

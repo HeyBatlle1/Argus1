@@ -12,6 +12,8 @@ import { CuriosityLog } from './CuriosityLog';
 import { InnerTruth } from './InnerTruth';
 import { PartnershipDynamics } from './PartnershipDynamics';
 import { BreakthroughMoments } from './BreakthroughMoments';
+import { SkillsList } from './SkillsList';
+import { ActivityFeed } from './ActivityFeed';
 
 export function MindPanel() {
   const [collapsed, setCollapsed] = useState(false);
@@ -22,6 +24,8 @@ export function MindPanel() {
   const innerTruths = useAgentStore((s) => s.innerTruths);
   const dynamics = useAgentStore((s) => s.partnershipDynamics);
   const breakthroughs = useAgentStore((s) => s.breakthroughs);
+  const skills = useAgentStore((s) => s.skills);
+  const activity = useAgentStore((s) => s.activity);
   const activeModel = useAgentStore((s) => s.activeModel);
 
   return (
@@ -107,8 +111,24 @@ export function MindPanel() {
               {tier === 'royal' && (
                 <>
                   <CollapsibleSection
-                    title="Session Context"
+                    title="Activity"
                     defaultOpen={true}
+                    count={activity.length > 0 ? activity.length : undefined}
+                  >
+                    <ActivityFeed entries={activity} />
+                  </CollapsibleSection>
+
+                  <CollapsibleSection
+                    title="Skills"
+                    defaultOpen={false}
+                    count={skills.length > 0 ? skills.length : undefined}
+                  >
+                    <SkillsList skills={skills} />
+                  </CollapsibleSection>
+
+                  <CollapsibleSection
+                    title="Session Context"
+                    defaultOpen={false}
                     count={memories.length}
                   >
                     <MemoryList memories={memories} />
