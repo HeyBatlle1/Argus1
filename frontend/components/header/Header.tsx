@@ -9,9 +9,11 @@ import { useAgentStore } from '@/hooks/useAgentState';
 
 interface Props {
   onToggleHistory: () => void;
+  paneCount: 1 | 2 | 3;
+  onSetPaneCount: (n: 1 | 2 | 3) => void;
 }
 
-export function Header({ onToggleHistory }: Props) {
+export function Header({ onToggleHistory, paneCount, onSetPaneCount }: Props) {
   const title = useAgentStore((s) => s.currentConversationTitle);
   const conversations = useAgentStore((s) => s.conversations);
 
@@ -80,12 +82,59 @@ export function Header({ onToggleHistory }: Props) {
         </div>
       )}
 
-      {/* Right: Connection + Sentry + Model */}
+      {/* Right: Pane toggles + Connection + Sentry + Model */}
       <div className="flex items-center gap-2">
+        {/* Split-pane controls */}
+        <div
+          className="flex items-center rounded overflow-hidden"
+          style={{ border: '1px solid #1e1e32' }}
+          title="Split panes"
+        >
+          {([1, 2, 3] as const).map((n) => (
+            <button
+              key={n}
+              onClick={() => onSetPaneCount(n)}
+              className="flex items-center justify-center transition-colors"
+              style={{
+                width: 26,
+                height: 24,
+                background: paneCount === n ? 'rgba(201,168,76,0.15)' : 'transparent',
+                borderRight: n < 3 ? '1px solid #1e1e32' : undefined,
+              }}
+              title={`${n} pane${n > 1 ? 's' : ''}`}
+            >
+              <PaneIcon count={n} active={paneCount === n} />
+            </button>
+          ))}
+        </div>
+
+        <div className="h-4 w-px" style={{ background: '#1e1e32' }} />
         <ConnectionStatus />
         <SentryDropdown />
         <ModelSelector />
       </div>
     </header>
+  );
+}
+
+function PaneIcon({ count, active }: { count: number; active: boolean }) {
+  const color = active ? '#c9a84c' : '#3a3a5a';
+  if (count === 1) return (
+    <svg width="14" height="12" viewBox="0 0 14 12" fill="none">
+      <rect x="1" y="1" width="12" height="10" rx="1" stroke={color} strokeWidth="1.2"/>
+    </svg>
+  );
+  if (count === 2) return (
+    <svg width="14" height="12" viewBox="0 0 14 12" fill="none">
+      <rect x="1" y="1" width="5.5" height="10" rx="1" stroke={color} strokeWidth="1.2"/>
+      <rect x="7.5" y="1" width="5.5" height="10" rx="1" stroke={color} strokeWidth="1.2"/>
+    </svg>
+  );
+  return (
+    <svg width="14" height="12" viewBox="0 0 14 12" fill="none">
+      <rect x="1"   y="1" width="3.5" height="10" rx="0.8" stroke={color} strokeWidth="1.2"/>
+      <rect x="5.2" y="1" width="3.5" height="10" rx="0.8" stroke={color} strokeWidth="1.2"/>
+      <rect x="9.4" y="1" width="3.5" height="10" rx="0.8" stroke={color} strokeWidth="1.2"/>
+    </svg>
   );
 }
