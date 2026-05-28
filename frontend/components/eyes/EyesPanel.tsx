@@ -58,7 +58,7 @@ export function EyesPanel() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 flex flex-col overflow-y-auto"
+            className="absolute inset-0 flex flex-col"
           >
             {/* Panel header */}
             <div className="flex items-center justify-between px-3 py-2 border-b border-argus-borderBright flex-shrink-0" style={{ background: 'var(--surface-hi)' }}>
@@ -73,62 +73,95 @@ export function EyesPanel() {
               </button>
             </div>
 
-            {/* Agent Status */}
-            <CollapsibleSection title="Agent Status" defaultOpen={true}>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <EyeStateIndicator state={eyeState} size="sm" showLabel={true} />
+            {/* Scrollable sections */}
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {/* Agent Status */}
+              <CollapsibleSection title="Agent Status" defaultOpen={true}>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <EyeStateIndicator state={eyeState} size="sm" showLabel={true} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-mono tracking-widest uppercase text-argus-textDim">MODEL</span>
+                    <span className="text-[11px] font-mono text-argus-amber">{modelCfg.name}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-mono tracking-widest uppercase text-argus-textDim">TIER</span>
+                    <span className="text-[11px] font-mono" style={{ color: modelCfg.color }}>
+                      {modelCfg.icon} {modelCfg.tierLabel}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[9px] font-mono tracking-widest uppercase text-argus-textDim">MODEL</span>
-                  <span className="text-[11px] font-mono text-argus-amber">{modelCfg.name}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[9px] font-mono tracking-widest uppercase text-argus-textDim">TIER</span>
-                  <span className="text-[11px] font-mono" style={{ color: modelCfg.color }}>
-                    {modelCfg.icon} {modelCfg.tierLabel}
-                  </span>
-                </div>
-              </div>
-            </CollapsibleSection>
+              </CollapsibleSection>
 
-            {/* Active Tools */}
-            <CollapsibleSection title="Active Tools" defaultOpen={true} count={tools.length}>
-              <div className="divide-y divide-argus-border/30">
-                {tools.map((tool) => (
-                  <ToolStatus key={tool.name} tool={tool} />
-                ))}
-              </div>
-            </CollapsibleSection>
-
-            {/* Vault */}
-            <CollapsibleSection title="Vault" defaultOpen={true}>
-              <VaultStatus
-                locked={!connected}
-                keys={vaultKeys}
-              />
-            </CollapsibleSection>
-
-            {/* MCP Servers */}
-            <CollapsibleSection title="MCP Servers" defaultOpen={false} count={mcpServers.length}>
-              {mcpServers.length === 0 ? (
-                <p className="text-[10px] font-mono text-argus-textDim">No servers connected.</p>
-              ) : (
-                <div className="space-y-1">
-                  {mcpServers.map((name) => (
-                    <div key={name} className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-argus-greenLight flex-shrink-0" />
-                      <span className="text-[10px] font-mono text-argus-textDim truncate">{name}</span>
-                    </div>
+              {/* Active Tools */}
+              <CollapsibleSection title="Active Tools" defaultOpen={true} count={tools.length}>
+                <div className="divide-y divide-argus-border/30">
+                  {tools.map((tool) => (
+                    <ToolStatus key={tool.name} tool={tool} />
                   ))}
                 </div>
-              )}
-            </CollapsibleSection>
+              </CollapsibleSection>
 
-            {/* System */}
-            <CollapsibleSection title="System" defaultOpen={false}>
-              <SystemInfo />
-            </CollapsibleSection>
+              {/* Vault */}
+              <CollapsibleSection title="Vault" defaultOpen={true}>
+                <VaultStatus
+                  locked={!connected}
+                  keys={vaultKeys}
+                />
+              </CollapsibleSection>
+
+              {/* MCP Servers */}
+              <CollapsibleSection title="MCP Servers" defaultOpen={false} count={mcpServers.length}>
+                {mcpServers.length === 0 ? (
+                  <p className="text-[10px] font-mono text-argus-textDim">No servers connected.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {mcpServers.map((name) => (
+                      <div key={name} className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-argus-greenLight flex-shrink-0" />
+                        <span className="text-[10px] font-mono text-argus-textDim truncate">{name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CollapsibleSection>
+
+              {/* System */}
+              <CollapsibleSection title="System" defaultOpen={false}>
+                <SystemInfo />
+              </CollapsibleSection>
+            </div>
+
+            {/* Ferris — pinned to bottom, never scrolls away */}
+            <div className="mt-auto flex items-end justify-center pb-3 pt-4 flex-shrink-0" aria-hidden="true">
+              <svg viewBox="0 0 340 220" xmlns="http://www.w3.org/2000/svg" style={{ width: 180, height: 120, opacity: 0.18 }}>
+                <g transform="translate(168, 110)" fill="#c9a84c" stroke="#c9a84c">
+                  <ellipse cx="0" cy="0" rx="52" ry="38"/>
+                  <ellipse cx="0" cy="-5" rx="34" ry="22" fill="none" strokeWidth="1.5"/>
+                  <circle cx="-20" cy="-20" r="13"/>
+                  <circle cx="-18" cy="-20" r="7" fill="#0d0d16" stroke="none"/>
+                  <circle cx="-15" cy="-23" r="2" fill="#c9a84c" stroke="none"/>
+                  <circle cx="20" cy="-20" r="13"/>
+                  <circle cx="22" cy="-20" r="7" fill="#0d0d16" stroke="none"/>
+                  <circle cx="25" cy="-23" r="2" fill="#c9a84c" stroke="none"/>
+                  <line x1="-30" y1="-34" x2="-13" y2="-31" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
+                  <line x1="13" y1="-31" x2="30" y2="-34" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
+                  <path d="M-50,0 Q-64,-8 -72,-12" fill="none" strokeWidth="11" strokeLinecap="round"/>
+                  <ellipse cx="-72" cy="-12" rx="14" ry="10" transform="rotate(-15 -72 -12)" stroke="none"/>
+                  <ellipse cx="-80" cy="-26" rx="10" ry="7" transform="rotate(-30 -80 -26)" stroke="none"/>
+                  <path d="M50,0 Q64,-8 72,-12" fill="none" strokeWidth="11" strokeLinecap="round"/>
+                  <ellipse cx="72" cy="-12" rx="14" ry="10" transform="rotate(15 72 -12)" stroke="none"/>
+                  <ellipse cx="80" cy="-26" rx="10" ry="7" transform="rotate(30 80 -26)" stroke="none"/>
+                  <line x1="-40" y1="16" x2="-56" y2="32" strokeWidth="5" strokeLinecap="round" fill="none"/>
+                  <line x1="-26" y1="22" x2="-36" y2="40" strokeWidth="5" strokeLinecap="round" fill="none"/>
+                  <line x1="-10" y1="25" x2="-12" y2="44" strokeWidth="5" strokeLinecap="round" fill="none"/>
+                  <line x1="40" y1="16" x2="56" y2="32" strokeWidth="5" strokeLinecap="round" fill="none"/>
+                  <line x1="26" y1="22" x2="36" y2="40" strokeWidth="5" strokeLinecap="round" fill="none"/>
+                  <line x1="10" y1="25" x2="12" y2="44" strokeWidth="5" strokeLinecap="round" fill="none"/>
+                </g>
+              </svg>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
