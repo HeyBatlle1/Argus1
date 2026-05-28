@@ -44,6 +44,12 @@ impl RiskLevel {
 pub fn classify_risk(command: &str) -> RiskLevel {
     let cmd = command.trim();
 
+    // Normalize internal whitespace before pattern matching.
+    // Prevents bypass via extra spaces/tabs/newlines between tokens
+    // e.g. "python3  -c 'code'" or "python3\n-c\n'code'" → "python3 -c 'code'"
+    let normalized: String = cmd.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cmd = normalized.as_str();
+
     // Subshell execution — always HIGH (arbitrary code injection vector)
     if cmd.contains("$(") || cmd.contains('`') {
         return RiskLevel::High;

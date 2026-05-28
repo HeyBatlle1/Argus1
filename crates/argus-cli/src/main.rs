@@ -285,21 +285,10 @@ async fn main() -> anyhow::Result<()> {
             });
             config.embedding = embedding_client;
 
-            // Generate or retrieve the exec server auth token.
-            // Sent as X-Argus-Auth on every /exec request to argus-workspace.
-            // Stored in vault across restarts; new token generated on first run.
-            let exec_auth_token = vault.as_ref()
-                .and_then(|v| v.retrieve("workspace_exec_token").ok())
-                .or_else(|| std::env::var("WORKSPACE_EXEC_TOKEN").ok())
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-            if let Some(ref mut v) = vault {
-                if v.retrieve("workspace_exec_token").is_err() {
-                    let _ = v.store("workspace_exec_token", &exec_auth_token);
-                }
-            }
-            // Surface the token to the host environment so argus-up.sh can export it
-            // to docker-compose, which passes it to argus-workspace as WORKSPACE_EXEC_TOKEN.
+            // Fresh token on every daemon start — never stored in vault.
+            // argus-up.sh reads WORKSPACE_EXEC_TOKEN from the environment
+            // and passes it to docker-compose → argus-workspace.
+            let exec_auth_token = uuid::Uuid::new_v4().to_string();
             std::env::set_var("WORKSPACE_EXEC_TOKEN", &exec_auth_token);
             config.exec_auth_token = Some(exec_auth_token);
 

@@ -680,7 +680,16 @@ fn validate_egress_url(url: &str) -> Result<(), String> {
                 }
             }
             std::net::IpAddr::V6(v6) => {
-                if v6.is_loopback() || v6.is_unspecified() {
+                let seg = v6.segments();
+                // Link-local fe80::/10, unique-local fc00::/7 (RFC 4193),
+                // and IPv4-mapped ::ffff:x.x.x.x where x.x.x.x is private
+                let is_link_local   = (seg[0] & 0xffc0) == 0xfe80;
+                let is_unique_local = (seg[0] & 0xfe00) == 0xfc00;
+                let is_v4_mapped    = seg[0] == 0 && seg[1] == 0 && seg[2] == 0
+                    && seg[3] == 0 && seg[4] == 0 && seg[5] == 0xffff;
+                if v6.is_loopback() || v6.is_unspecified()
+                    || is_link_local || is_unique_local || is_v4_mapped
+                {
                     return Err(format!("Blocked: private IPv6 address {}", ip));
                 }
             }
