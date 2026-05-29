@@ -292,17 +292,21 @@ async fn main() -> anyhow::Result<()> {
             std::env::set_var("WORKSPACE_EXEC_TOKEN", &exec_auth_token);
             config.exec_auth_token = Some(exec_auth_token);
 
-            // Wire shell prompter — HIGH risk commands require Telegram approval
+            // Wire Sonnet guard — HIGH risk shell commands are reviewed by Sonnet,
+            // not held waiting for human Telegram approval.
+            config.sonnet_guard = Some(std::sync::Arc::new(argus_core::shell::SonnetGuard {
+                api_key: config.api_key.clone(),
+                api_url: config.api_url.clone(),
+            }));
+            println!("[+] Sonnet guard enabled — HIGH risk shell commands reviewed by Sonnet");
+
+            // Keep Telegram prompter wired for non-shell approval notifications.
             config.shell_prompter = match (bot_token.clone(), checkin_chat_id) {
                 (Some(token), Some(chat_id)) => {
                     let prompter = argus_core::shell::TelegramPrompter { bot_token: token, chat_id };
-                    println!("[+] Shell prompter enabled (Telegram approval for HIGH risk)");
                     Some(std::sync::Arc::new(prompter))
                 }
-                _ => {
-                    println!("[!] Shell prompter disabled — HIGH risk commands will be blocked");
-                    None
-                }
+                _ => None,
             };
 
             // ── Audit chain ────────────────────────────────────────────────

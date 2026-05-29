@@ -14,6 +14,8 @@ services:
       - SUPABASE_ARGUS_SERVICE_KEY=${SUPABASE_ARGUS_SERVICE_KEY:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID:-}
     ports:
       - "8888:8888"
       - "9000:9000"
@@ -21,6 +23,7 @@ services:
       - argus-data:/argus/data
       - workspace:/workspace
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ~/.argus/mcp.json:/home/argus/.argus/mcp.json:ro
     depends_on:
       - argus-workspace
     deploy:

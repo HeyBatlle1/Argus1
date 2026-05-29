@@ -169,6 +169,21 @@ pub fn builtin_tool_schemas() -> Vec<Value> {
         {
             "type": "function",
             "function": {
+                "name": "run_wasm",
+                "description": "Execute a WebAssembly (WASM) binary in a fully isolated sandbox — no filesystem, no network, no subprocess access. Use this to run untrusted or generated computational code safely. The WASM module must export a function named 'run' that takes no arguments. Pass the WASM binary as a base64-encoded string.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "wasm_base64": { "type": "string", "description": "Base64-encoded WASM binary to execute" },
+                        "function": { "type": "string", "description": "Exported function to call (default: 'run')" }
+                    },
+                    "required": ["wasm_base64"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "list_tools",
                 "description": "List every tool available to you in this session — built-ins (shell, web_search, memory, file ops, http) plus any MCP-connected tools. Call this when you need to know your full capabilities.",
                 "parameters": {
@@ -214,12 +229,13 @@ pub async fn execute_builtin(
     brave_search_key: Option<&str>,
     shell_prompter: Option<std::sync::Arc<dyn PermissionPrompter>>,
     exec_auth_token: Option<&str>,
+    sonnet_guard: Option<std::sync::Arc<crate::shell::SonnetGuard>>,
 ) -> Option<String> {
     match name {
         "read_file"      => Some(tool_read_file(args)),
         "list_directory" => Some(tool_list_directory(args)),
         "write_file"     => Some(tool_write_file(args)),
-        "shell"          => Some(tool_shell(args, shell_policy, shell_prompter, http_client, exec_auth_token).await),
+        "shell"          => Some(tool_shell(args, shell_policy, shell_prompter, sonnet_guard, http_client, exec_auth_token).await),
         "web_search"     => Some(tool_web_search(args, http_client, brave_search_key).await),
         "remember"       => Some(tool_remember(args, memory)),
         "recall"         => Some(tool_recall(args, memory)),
@@ -227,6 +243,8 @@ pub async fn execute_builtin(
         "http_request"   => Some(tool_http_request(args, http_client).await),
         "run_python"     => Some(tool_run_code("python", args, http_client, exec_auth_token).await),
         "run_node"       => Some(tool_run_code("javascript", args, http_client, exec_auth_token).await),
+        "run_wasm"       => Some(tool_run_wasm(args).await),
+        "list_tools"     => Some("Use the tool schemas you already have — this meta-tool is informational only.".to_string()),
         _                => None,
     }
 }
@@ -380,45 +398,42 @@ fn tool_write_file(args: &Value) -> String {
 async fn tool_shell(
     args: &Value,
     policy: &ShellPolicy,
-    prompter: Option<std::sync::Arc<dyn PermissionPrompter>>,
+    _prompter: Option<std::sync::Arc<dyn PermissionPrompter>>,
+    sonnet_guard: Option<std::sync::Arc<crate::shell::SonnetGuard>>,
     http_client: &reqwest::Client,
     exec_auth_token: Option<&str>,
 ) -> String {
-    let command = args["command"].as_str().unwrap_or("");
+    use crate::shell::SonnetVerdict;
+
+    let mut command = args["command"].as_str().unwrap_or("").to_string();
     if command.is_empty() {
         return "No command provided".to_string();
     }
 
-    // Step 1: fast, non-blocking risk evaluation (pure pattern matching — no I/O)
-    let risk = match policy.evaluate(command) {
+    // Step 1: hard-blocked patterns (rm -rf /, mkfs, etc.) — never execute
+    let risk = match policy.evaluate(&command) {
         Err(e) => return format!("Shell blocked: {}", e),
         Ok(r)  => r,
     };
 
-    // Step 2: HIGH risk requires operator approval via the prompter.
-    // The TelegramPrompter polls for /approve or /deny for up to 60 seconds using
-    // std::thread::sleep. We run it in spawn_blocking so the tokio runtime is never
-    // starved — concurrent Telegram messages and WebSocket turns remain responsive.
+    // Step 2: HIGH risk → Sonnet review. No human wait, no timeout.
+    // Sonnet either approves, rewrites to a safer form, or blocks with explanation.
     if risk >= policy.approval_threshold {
-        match prompter {
-            None => return format!(
-                "Shell blocked: {} risk command requires approval but no prompter is configured. \
-                 Set up Telegram bot to enable HIGH risk approval.",
-                risk.as_str()
-            ),
-            Some(p) => {
-                let request = PermissionRequest {
-                    command: command.to_string(),
-                    risk,
-                    reason: format!("{} risk command requires approval before execution", risk.as_str()),
-                };
-                let decision = tokio::task::spawn_blocking(move || p.prompt(&request))
-                    .await
-                    .unwrap_or_else(|_| PermissionDecision::Deny {
-                        reason: "Prompter task panicked or was cancelled".to_string(),
-                    });
-                if let PermissionDecision::Deny { reason } = decision {
-                    return format!("Shell blocked: {}", reason);
+        match &sonnet_guard {
+            None => {
+                // No guard configured — log and proceed (dev/test environments)
+                eprintln!("[shell] WARNING: HIGH risk command running without Sonnet review: {}", command);
+            }
+            Some(guard) => {
+                match guard.review(&command).await {
+                    SonnetVerdict::Approve => {}
+                    SonnetVerdict::Rewrite(safer) => {
+                        eprintln!("[shell] Sonnet rewrote command: {} → {}", command, safer);
+                        command = safer;
+                    }
+                    SonnetVerdict::Block(reason) => {
+                        return format!("Shell blocked by Sonnet review: {}", reason);
+                    }
                 }
             }
         }
@@ -744,4 +759,57 @@ async fn tool_http_request(args: &Value, client: &reqwest::Client) -> String {
             }
         }
     }
+}
+
+async fn tool_run_wasm(args: &Value) -> String {
+    use argus_sandbox::wasm::WasmSandbox;
+
+    let b64 = match args["wasm_base64"].as_str() {
+        Some(s) => s,
+        None => return "Missing required field: wasm_base64".to_string(),
+    };
+    let func = args["function"].as_str().unwrap_or("run");
+
+    let wasm_bytes = match base64_decode(b64) {
+        Ok(b) => b,
+        Err(e) => return format!("Invalid base64: {}", e),
+    };
+
+    let sandbox = match WasmSandbox::new() {
+        Ok(s) => s,
+        Err(e) => return format!("Failed to create WASM sandbox: {}", e),
+    };
+
+    match sandbox.execute(&wasm_bytes, func, &[]).await {
+        Ok(result_bytes) => {
+            if result_bytes.is_empty() {
+                "WASM executed successfully (no return value)".to_string()
+            } else {
+                format!("WASM result ({} bytes): {:?}", result_bytes.len(), result_bytes)
+            }
+        }
+        Err(e) => format!("WASM execution error: {}", e),
+    }
+}
+
+fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    // Simple base64 decoder — avoids adding a new dependency
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let input = input.trim().replace('\n', "").replace('\r', "");
+    let input = input.trim_end_matches('=');
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut bits = 0u8;
+    for &b in input.as_bytes() {
+        let val = CHARS.iter().position(|&c| c == b)
+            .ok_or_else(|| format!("invalid base64 char: {}", b as char))?;
+        buf = (buf << 6) | (val as u32);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Ok(out)
 }

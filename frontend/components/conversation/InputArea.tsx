@@ -8,21 +8,20 @@ import { EYE_SYMBOLS } from '@/lib/constants';
 
 export function InputArea() {
   const [value, setValue] = useState('');
+  const [focused, setFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendMessage = useAgentStore((s) => s.sendMessage);
   const isStreaming = useAgentStore((s) => s.isStreaming);
   const eyeState = useAgentStore((s) => s.eyeState);
   const initConnection = useAgentStore((s) => s.initConnection);
 
-  // Initialize connection on mount (real WS or dev mock)
   useEffect(() => { initConnection(); }, [initConnection]);
 
-  // Auto-resize textarea
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
   }, [value]);
 
   function submit() {
@@ -41,55 +40,95 @@ export function InputArea() {
 
   const placeholder = isStreaming
     ? `${EYE_SYMBOLS[eyeState]} ${eyeState === 'thinking' ? 'Thinking...' : eyeState === 'executing' ? 'Executing...' : 'Processing...'}`
-    : '◉ Argus is watching...';
+    : '◉  Ask Argus anything...';
+
+  const canSend = !!value.trim() && !isStreaming;
 
   return (
     <div
-      className="flex-shrink-0 border-t border-argus-border px-4 py-3"
-      style={{ background: '#0d0d14' }}
+      className="flex-shrink-0 px-4 py-4"
+      style={{ background: '#0d0d14', borderTop: '1px solid #1e1e32' }}
     >
+      {/* Elegant input shell */}
       <div
-        className={`flex items-end gap-3 rounded border px-3 py-2 transition-colors ${
-          isStreaming
-            ? 'border-argus-amberDim/30'
-            : 'border-argus-border focus-within:border-argus-amberDim'
-        }`}
-        style={{ background: '#0a0a0f' }}
+        style={{
+          borderRadius: '14px',
+          border: isStreaming
+            ? '1px solid rgba(201,168,76,0.35)'
+            : focused
+            ? '1px solid rgba(201,168,76,0.5)'
+            : '1px solid #2a2a42',
+          background: focused
+            ? 'rgba(201,168,76,0.03)'
+            : '#0a0a12',
+          boxShadow: isStreaming
+            ? '0 0 0 3px rgba(201,168,76,0.08), inset 0 1px 0 rgba(255,255,255,0.03)'
+            : focused
+            ? '0 0 0 3px rgba(201,168,76,0.06), inset 0 1px 0 rgba(255,255,255,0.03)'
+            : 'inset 0 1px 0 rgba(255,255,255,0.02)',
+          transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
+          padding: '10px 12px 10px 16px',
+          display: 'flex',
+          alignItems: 'flex-end',
+          gap: '10px',
+        }}
       >
         <textarea
           ref={textareaRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={onKeyDown}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           disabled={isStreaming}
           placeholder={placeholder}
           rows={1}
-          className="flex-1 bg-transparent text-sm text-argus-text placeholder-argus-textDim/50 resize-none outline-none font-sans leading-relaxed py-0.5"
-          style={{ maxHeight: '120px', fontFamily: "'Instrument Sans', sans-serif" }}
+          className="flex-1 bg-transparent resize-none outline-none leading-relaxed"
+          style={{
+            fontFamily: "'Instrument Sans', sans-serif",
+            fontSize: '14px',
+            color: '#e8e8f0',
+            maxHeight: '140px',
+            paddingBottom: '2px',
+          }}
         />
+
+        {/* Send button */}
         <motion.button
           onClick={submit}
-          disabled={!value.trim() || isStreaming}
-          className="flex-shrink-0 w-7 h-7 rounded flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          disabled={!canSend}
+          className="flex-shrink-0 flex items-center justify-center cursor-pointer"
           style={{
-            background: value.trim() && !isStreaming ? 'rgba(245,184,0,0.2)' : 'transparent',
-            color: value.trim() && !isStreaming ? '#f5b800' : '#b8b5ac',
+            width: 32,
+            height: 32,
+            borderRadius: '10px',
+            background: canSend ? 'rgba(201,168,76,0.2)' : 'rgba(255,255,255,0.04)',
+            border: canSend ? '1px solid rgba(201,168,76,0.5)' : '1px solid #2a2a42',
+            color: canSend ? '#c9a84c' : '#3a3a5a',
+            cursor: canSend ? 'pointer' : 'not-allowed',
+            transition: 'all 0.18s',
           }}
           animate={
             isStreaming
-              ? { boxShadow: ['0 0 4px rgba(201,168,76,0.2)', '0 0 10px rgba(201,168,76,0.5)', '0 0 4px rgba(201,168,76,0.2)'] }
+              ? { boxShadow: ['0 0 4px rgba(201,168,76,0.2)', '0 0 12px rgba(201,168,76,0.45)', '0 0 4px rgba(201,168,76,0.2)'] }
               : {}
           }
-          transition={isStreaming ? { duration: 1.2, repeat: Infinity } : {}}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
+          transition={isStreaming ? { duration: 1.4, repeat: Infinity } : {}}
+          whileHover={canSend ? { scale: 1.06, background: 'rgba(201,168,76,0.3)' } : {}}
+          whileTap={canSend ? { scale: 0.93 } : {}}
         >
-          <Send size={14} />
+          <Send size={13} />
         </motion.button>
       </div>
-      <div className="flex justify-between items-center mt-1.5 px-1">
-        <span className="text-[9px] font-mono text-argus-textDim/40">Enter to send · Shift+Enter for newline</span>
-        <span className="text-[9px] font-mono text-argus-textDim/40">{value.length > 0 ? `${value.length}` : ''}</span>
+
+      {/* Hint row */}
+      <div className="flex justify-between items-center mt-2 px-1">
+        <span className="text-[9px] font-mono" style={{ color: '#2a2a42' }}>
+          Enter to send · Shift+Enter for newline
+        </span>
+        <span className="text-[9px] font-mono" style={{ color: value.length > 200 ? '#c9a84c' : '#2a2a42' }}>
+          {value.length > 0 ? value.length : ''}
+        </span>
       </div>
     </div>
   );

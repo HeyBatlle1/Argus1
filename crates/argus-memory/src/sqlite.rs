@@ -101,12 +101,18 @@ impl SqliteMemory {
         })
     }
 
-    /// Open using the default path (~/.argus/memory.db)
+    /// Open using the default path.
+    /// Respects ARGUS_DATA_DIR env var (persistent volume in Docker).
+    /// Falls back to ~/.argus/memory.db for local dev.
     pub fn open_default() -> Result<Self, String> {
-        let path = dirs::home_dir()
-            .ok_or_else(|| "No home directory".to_string())?
-            .join(".argus")
-            .join("memory.db");
+        let path = if let Ok(data_dir) = std::env::var("ARGUS_DATA_DIR") {
+            std::path::PathBuf::from(data_dir).join("memory.db")
+        } else {
+            dirs::home_dir()
+                .ok_or_else(|| "No home directory".to_string())?
+                .join(".argus")
+                .join("memory.db")
+        };
         Self::open(path)
     }
 

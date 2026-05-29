@@ -1,14 +1,11 @@
 //! Shell execution policy — risk-classified, three-tier model
 //!
-//! Inspired by claw-code (MIT license) permission architecture.
-//! Original allowlist model replaced with dynamic risk scoring:
-//!
 //!   LOW    → execute immediately, log
 //!   MEDIUM → execute, log with warning, surface in UI
-//!   HIGH   → block, requires PermissionPrompter approval
+//!   HIGH   → Sonnet reviews; approves, rewrites to safer form, or blocks
 //!
-//! The PermissionPrompter trait is interchangeable — terminal, Telegram,
-//! WebSocket to frontend, or silent-approve for testing.
+//! HIGH risk no longer waits for human approval — Sonnet acts as the gate.
+//! The TelegramPrompter is kept for notifications only, not blocking.
 
 use std::collections::HashSet;
 use serde_json;
@@ -205,6 +202,88 @@ impl PermissionPrompter for AlwaysDeny {
     fn prompt(&self, req: &PermissionRequest) -> PermissionDecision {
         PermissionDecision::Deny {
             reason: format!("Blocked: {} risk command denied in current mode", req.risk.as_str()),
+        }
+    }
+}
+
+// ── Sonnet guard ─────────────────────────────────────────────────────────────
+
+/// The verdict Sonnet returns when reviewing a HIGH risk command.
+#[derive(Debug)]
+pub enum SonnetVerdict {
+    /// Execute as-is.
+    Approve,
+    /// Execute this safer version instead.
+    Rewrite(String),
+    /// Do not execute; explanation is returned to the caller.
+    Block(String),
+}
+
+/// Calls Claude Sonnet via OpenRouter to review HIGH-risk shell commands.
+/// Non-blocking — resolves in ~1-2 seconds, no human in the loop.
+pub struct SonnetGuard {
+    pub api_key: String,
+    pub api_url: String,
+}
+
+impl SonnetGuard {
+    pub async fn review(&self, command: &str) -> SonnetVerdict {
+        let prompt = format!(
+            "You are a shell command safety reviewer for an AI agent (Argus).\n\
+             Review this HIGH-risk shell command and respond with exactly one of:\n\
+             - APPROVE — if it is safe to execute as written\n\
+             - REWRITE: <new command> — if a safer version achieves the same goal\n\
+             - BLOCK: <reason> — if it should not execute at all\n\n\
+             Command: {}\n\n\
+             Respond with only the verdict line, nothing else.",
+            command
+        );
+
+        let body = serde_json::json!({
+            "model": "anthropic/claude-sonnet-4-5",
+            "max_tokens": 200,
+            "temperature": 0.0,
+            "messages": [{ "role": "user", "content": prompt }]
+        });
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(&self.api_url)
+            .bearer_auth(&self.api_key)
+            .header("HTTP-Referer", "https://argus.local")
+            .json(&body)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await;
+
+        let text = match resp {
+            Err(e) => {
+                eprintln!("[sonnet-guard] request failed: {}", e);
+                return SonnetVerdict::Block(format!("Sonnet review unavailable: {}", e));
+            }
+            Ok(r) => match r.json::<serde_json::Value>().await {
+                Err(e) => {
+                    eprintln!("[sonnet-guard] parse failed: {}", e);
+                    return SonnetVerdict::Block("Sonnet review parse error".to_string());
+                }
+                Ok(v) => v["choices"][0]["message"]["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
+            },
+        };
+
+        if text.to_uppercase().starts_with("APPROVE") {
+            SonnetVerdict::Approve
+        } else if let Some(rest) = text.strip_prefix("REWRITE:").or_else(|| text.strip_prefix("Rewrite:")) {
+            SonnetVerdict::Rewrite(rest.trim().to_string())
+        } else if let Some(rest) = text.strip_prefix("BLOCK:").or_else(|| text.strip_prefix("Block:")) {
+            SonnetVerdict::Block(rest.trim().to_string())
+        } else {
+            // Unparseable response — fail safe
+            eprintln!("[sonnet-guard] unexpected verdict: {}", text);
+            SonnetVerdict::Block(format!("Sonnet returned unrecognised verdict: {}", text))
         }
     }
 }

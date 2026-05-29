@@ -152,8 +152,16 @@ export function ConversationDrawer({ open, onClose }: Props) {
               <div className="flex items-center gap-1">
                 <button
                   onClick={handleNew}
-                  className="flex items-center gap-1 text-[9px] font-mono px-2 py-1 rounded transition-colors"
-                  style={{ background: 'rgba(255,176,0,0.1)', border: '1px solid rgba(255,176,0,0.3)', color: '#ffb000' }}
+                  className="flex items-center gap-1 text-[9px] font-mono px-2 py-1 rounded transition-all cursor-pointer"
+                  style={{ background: 'rgba(255,176,0,0.1)', border: '1px solid rgba(255,176,0,0.35)', color: '#ffb000' }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,176,0,0.18)';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,176,0,0.6)';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,176,0,0.1)';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,176,0,0.35)';
+                  }}
                   title="New conversation"
                 >
                   <Plus size={10} />
@@ -161,10 +169,21 @@ export function ConversationDrawer({ open, onClose }: Props) {
                 </button>
                 <button
                   onClick={onClose}
-                  className="p-1 rounded transition-colors text-argus-textDim hover:text-argus-amber"
+                  className="flex items-center justify-center rounded transition-all cursor-pointer"
+                  style={{ width: 26, height: 26, background: 'rgba(255,255,255,0.04)', border: '1px solid #2a2a42', color: '#7a7a9a' }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color = '#c9a84c';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(201,168,76,0.4)';
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(201,168,76,0.07)';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color = '#7a7a9a';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = '#2a2a42';
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)';
+                  }}
                   title="Close"
                 >
-                  <X size={14} />
+                  <X size={13} />
                 </button>
               </div>
             </div>

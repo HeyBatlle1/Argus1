@@ -243,6 +243,12 @@ pub struct AgentConfig {
     /// Shared secret for authenticating requests to the workspace exec server.
     /// Sent as X-Argus-Auth header. Blocks prompt-injection SSRF to /exec.
     pub exec_auth_token: Option<String>,
+    /// Tool names to strip from the schema before sending to the model.
+    /// Use this to prevent autonomous/scheduled agents from calling destructive tools.
+    pub blocked_tools: Vec<String>,
+    /// Sonnet safety reviewer for HIGH risk shell commands.
+    /// When set, HIGH risk commands are reviewed by Sonnet before execution.
+    pub sonnet_guard: Option<std::sync::Arc<crate::shell::SonnetGuard>>,
 }
 
 impl AgentConfig {
@@ -259,6 +265,8 @@ impl AgentConfig {
             shell_prompter: None,
             audit: None,
             exec_auth_token: None,
+            blocked_tools: vec![],
+            sonnet_guard: None,
         }
     }
 
@@ -438,6 +446,14 @@ where
         }
     }
 
+    // Strip blocked tools — keeps autonomous/scheduled agents from calling shell etc.
+    if !config.blocked_tools.is_empty() {
+        tool_schemas.retain(|s| {
+            let name = s["function"]["name"].as_str().unwrap_or("");
+            !config.blocked_tools.iter().any(|b| b == name)
+        });
+    }
+
     // Final dedup guarantee
     {
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -578,7 +594,7 @@ where
                 }
                 out
             } else if let Some(output) =
-                tools::execute_builtin(name, &args, shell_policy, memory, http_client, config.brave_search_key.as_deref(), config.shell_prompter.clone(), config.exec_auth_token.as_deref()).await
+                tools::execute_builtin(name, &args, shell_policy, memory, http_client, config.brave_search_key.as_deref(), config.shell_prompter.clone(), config.exec_auth_token.as_deref(), config.sonnet_guard.clone()).await
             {
                 output
             } else {

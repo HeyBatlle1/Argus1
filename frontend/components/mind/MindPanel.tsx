@@ -15,8 +15,13 @@ import { BreakthroughMoments } from './BreakthroughMoments';
 import { SkillsList } from './SkillsList';
 import { ActivityFeed } from './ActivityFeed';
 
-export function MindPanel() {
+interface Props {
+  forceCollapsed?: boolean;
+}
+
+export function MindPanel({ forceCollapsed = false }: Props) {
   const [collapsed, setCollapsed] = useState(false);
+  const isCollapsed = forceCollapsed || collapsed;
   const tier = useAccessTier();
 
   const memories = useAgentStore((s) => s.memories);
@@ -30,14 +35,14 @@ export function MindPanel() {
 
   return (
     <motion.div
-      animate={{ width: collapsed ? 32 : 300 }}
+      animate={{ width: isCollapsed ? 32 : 300 }}
       transition={{ duration: 0.2, ease: 'easeInOut' }}
       className="relative h-full flex-shrink-0 overflow-hidden"
       style={{ background: '#0d0d16' }}
     >
       {/* Collapsed strip */}
       <AnimatePresence>
-        {collapsed && (
+        {isCollapsed && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -59,7 +64,7 @@ export function MindPanel() {
 
       {/* Full panel */}
       <AnimatePresence>
-        {!collapsed && (
+        {!isCollapsed && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

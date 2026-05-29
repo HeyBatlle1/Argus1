@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { useAgentStore } from '@/hooks/useAgentState';
 import { MessageList } from './MessageList';
 import { InputArea } from './InputArea';
@@ -8,6 +9,7 @@ import { Plus } from 'lucide-react';
 
 interface Props {
   onOpenArtifact: (artifacts: Artifact[], index: number) => void;
+  meetingBrief?: string;
 }
 
 // Ferris watermark — amber on dark, visible but quiet
@@ -46,10 +48,21 @@ const FERRIS_SVG = `
 </svg>
 `;
 
-export function ConversationPanel({ onOpenArtifact }: Props) {
+export function ConversationPanel({ onOpenArtifact, meetingBrief }: Props) {
   const title = useAgentStore((s) => s.currentConversationTitle);
   const newConversation = useAgentStore((s) => s.newConversation);
   const isStreaming = useAgentStore((s) => s.isStreaming);
+  const connected = useAgentStore((s) => s.connected);
+  const sendMessage = useAgentStore((s) => s.sendMessage);
+  const messages = useAgentStore((s) => s.messages);
+
+  const briefSentRef = useRef(false);
+  useEffect(() => {
+    if (connected && meetingBrief && !briefSentRef.current && messages.length === 0) {
+      briefSentRef.current = true;
+      setTimeout(() => sendMessage(meetingBrief), 1200);
+    }
+  }, [connected, meetingBrief, messages.length, sendMessage]);
 
   return (
     <div

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Send } from 'lucide-react';
+import { X, Plus, Send, RotateCcw } from 'lucide-react';
 import { RealConnection } from '@/hooks/useWebSocket';
 import { ServerMessage, Message, ToolCall, Artifact, ModelId, EyeState } from '@/lib/types';
 import { WS_URL } from '@/lib/constants';
@@ -21,9 +21,11 @@ interface Props {
   paneIndex: number;   // 1-based label for display
   initialModel?: ModelId;
   onClose: () => void;
+  /** If set, auto-sends this message as soon as the WebSocket connects */
+  openingBrief?: string;
 }
 
-export function ChatPane({ paneIndex, initialModel = 'grok-fast', onClose }: Props) {
+export function ChatPane({ paneIndex, initialModel = 'grok-fast', onClose, openingBrief }: Props) {
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState('');
@@ -149,6 +151,22 @@ export function ChatPane({ paneIndex, initialModel = 'grok-fast', onClose }: Pro
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
+  // ── Auto-send opening brief when connected ───────────────────────────────
+  const briefSentRef = useRef(false);
+  useEffect(() => {
+    if (connected && openingBrief && !briefSentRef.current && messages.length === 0) {
+      briefSentRef.current = true;
+      setTimeout(() => {
+        setMessages((prev) => [
+          ...prev,
+          { id: 'user-brief-' + Date.now(), role: 'user', content: openingBrief, timestamp: new Date() },
+        ]);
+        wsRef.current?.send({ type: 'user_message', content: openingBrief });
+        setTitle(openingBrief.slice(0, 50));
+      }, 800);
+    }
+  }, [connected, openingBrief, messages.length]);
+
   // ── Auto-resize textarea ─────────────────────────────────────────────────
   useEffect(() => {
     const el = textareaRef.current;
@@ -233,25 +251,55 @@ export function ChatPane({ paneIndex, initialModel = 'grok-fast', onClose }: Pro
         <button
           onClick={newConversation}
           disabled={isStreaming}
-          className="flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded transition-colors flex-shrink-0"
-          style={{ color: '#5a5a7a', border: '1px solid transparent' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#ffb000'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,176,0,0.3)'; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#5a5a7a'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent'; }}
+          className="flex items-center justify-center cursor-pointer flex-shrink-0 transition-all"
+          style={{
+            width: 24, height: 24, borderRadius: '7px',
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid #2a2a42',
+            color: '#6a6a8a',
+          }}
+          onMouseEnter={(e) => {
+            const el = e.currentTarget as HTMLButtonElement;
+            el.style.color = '#ffb000';
+            el.style.borderColor = 'rgba(255,176,0,0.4)';
+            el.style.background = 'rgba(255,176,0,0.08)';
+          }}
+          onMouseLeave={(e) => {
+            const el = e.currentTarget as HTMLButtonElement;
+            el.style.color = '#6a6a8a';
+            el.style.borderColor = '#2a2a42';
+            el.style.background = 'rgba(255,255,255,0.04)';
+          }}
           title="New conversation"
         >
-          <Plus size={10} />
+          <RotateCcw size={10} />
         </button>
 
         {/* Close pane */}
         <button
           onClick={onClose}
-          className="flex-shrink-0 transition-colors"
-          style={{ color: '#3a3a5a' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = '#c9a84c')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = '#3a3a5a')}
+          className="flex items-center justify-center cursor-pointer flex-shrink-0 transition-all"
+          style={{
+            width: 24, height: 24, borderRadius: '7px',
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid #2a2a42',
+            color: '#6a6a8a',
+          }}
+          onMouseEnter={(e) => {
+            const el = e.currentTarget as HTMLButtonElement;
+            el.style.color = '#c9a84c';
+            el.style.borderColor = 'rgba(201,168,76,0.4)';
+            el.style.background = 'rgba(201,168,76,0.07)';
+          }}
+          onMouseLeave={(e) => {
+            const el = e.currentTarget as HTMLButtonElement;
+            el.style.color = '#6a6a8a';
+            el.style.borderColor = '#2a2a42';
+            el.style.background = 'rgba(255,255,255,0.04)';
+          }}
           title="Close pane"
         >
-          <X size={13} />
+          <X size={11} />
         </button>
       </div>
 
@@ -321,44 +369,107 @@ export function ChatPane({ paneIndex, initialModel = 'grok-fast', onClose }: Pro
               </div>
 
               {/* Input */}
-              <div
-                className="flex-shrink-0 border-t px-3 py-2.5"
-                style={{ borderColor: '#1e1e32', background: '#0d0d14' }}
-              >
-                <div
-                  className="flex items-end gap-2 rounded border px-3 py-1.5 transition-colors"
-                  style={{
-                    background: '#0a0a0f',
-                    borderColor: isStreaming ? 'rgba(201,168,76,0.2)' : '#1e1e32',
-                  }}
-                >
-                  <textarea
-                    ref={textareaRef}
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={onKeyDown}
-                    disabled={isStreaming}
-                    placeholder={placeholder}
-                    rows={1}
-                    className="flex-1 bg-transparent text-sm text-argus-text placeholder-argus-textDim/40 resize-none outline-none font-sans leading-relaxed py-0.5"
-                    style={{ maxHeight: '120px', fontFamily: "'Instrument Sans', sans-serif" }}
-                  />
-                  <button
-                    onClick={send}
-                    disabled={!inputValue.trim() || isStreaming}
-                    className="flex-shrink-0 w-6 h-6 rounded flex items-center justify-center transition-colors disabled:opacity-30"
-                    style={{
-                      background: inputValue.trim() && !isStreaming ? 'rgba(201,168,76,0.15)' : 'transparent',
-                      color: inputValue.trim() && !isStreaming ? '#c9a84c' : '#5a5a7a',
-                    }}
-                  >
-                    <Send size={12} />
-                  </button>
-                </div>
-              </div>
+              <PaneInput
+                value={inputValue}
+                onChange={setInputValue}
+                onSubmit={send}
+                onKeyDown={onKeyDown}
+                disabled={isStreaming}
+                placeholder={placeholder}
+                textareaRef={textareaRef}
+              />
             </motion.div>
           )}
         </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+// ── Elegant pane input ────────────────────────────────────────────────────────
+interface PaneInputProps {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  disabled: boolean;
+  placeholder: string;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+}
+
+function PaneInput({ value, onChange, onSubmit, onKeyDown, disabled, placeholder, textareaRef }: PaneInputProps) {
+  const [focused, setFocused] = useState(false);
+  const canSend = !!value.trim() && !disabled;
+
+  return (
+    <div
+      className="flex-shrink-0 px-3 py-3"
+      style={{ borderTop: '1px solid #1e1e32', background: '#0d0d14' }}
+    >
+      <div
+        style={{
+          borderRadius: '12px',
+          border: disabled
+            ? '1px solid rgba(201,168,76,0.3)'
+            : focused
+            ? '1px solid rgba(201,168,76,0.45)'
+            : '1px solid #2a2a42',
+          background: focused ? 'rgba(201,168,76,0.025)' : '#0a0a12',
+          boxShadow: disabled
+            ? '0 0 0 2px rgba(201,168,76,0.07)'
+            : focused
+            ? '0 0 0 2px rgba(201,168,76,0.05)'
+            : 'none',
+          transition: 'border-color 0.18s, box-shadow 0.18s, background 0.18s',
+          padding: '8px 10px 8px 13px',
+          display: 'flex',
+          alignItems: 'flex-end',
+          gap: '8px',
+        }}
+      >
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          disabled={disabled}
+          placeholder={placeholder}
+          rows={1}
+          className="flex-1 bg-transparent resize-none outline-none leading-relaxed"
+          style={{
+            fontFamily: "'Instrument Sans', sans-serif",
+            fontSize: '13px',
+            color: '#e2e2ea',
+            maxHeight: '120px',
+            paddingBottom: '1px',
+          }}
+        />
+        <button
+          onClick={onSubmit}
+          disabled={!canSend}
+          className="flex-shrink-0 flex items-center justify-center cursor-pointer transition-all"
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: '9px',
+            background: canSend ? 'rgba(201,168,76,0.2)' : 'rgba(255,255,255,0.03)',
+            border: canSend ? '1px solid rgba(201,168,76,0.45)' : '1px solid #2a2a42',
+            color: canSend ? '#c9a84c' : '#3a3a5a',
+            cursor: canSend ? 'pointer' : 'not-allowed',
+          }}
+          onMouseEnter={(e) => {
+            if (!canSend) return;
+            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(201,168,76,0.32)';
+          }}
+          onMouseLeave={(e) => {
+            if (!canSend) return;
+            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(201,168,76,0.2)';
+          }}
+        >
+          <Send size={11} />
+        </button>
       </div>
     </div>
   );

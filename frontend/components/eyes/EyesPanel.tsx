@@ -12,8 +12,13 @@ import { SystemInfo } from './SystemInfo';
 import { EYE_LABELS } from '@/lib/constants';
 import { MODEL_CONFIG } from '@/lib/models';
 
-export function EyesPanel() {
+interface Props {
+  forceCollapsed?: boolean;
+}
+
+export function EyesPanel({ forceCollapsed = false }: Props) {
   const [collapsed, setCollapsed] = useState(false);
+  const isCollapsed = forceCollapsed || collapsed;
   const eyeState = useAgentStore((s) => s.eyeState);
   const activeModel = useAgentStore((s) => s.activeModel);
   const tools = useAgentStore((s) => s.tools);
@@ -26,14 +31,14 @@ export function EyesPanel() {
 
   return (
     <motion.div
-      animate={{ width: collapsed ? 32 : 240 }}
+      animate={{ width: isCollapsed ? 32 : 240 }}
       transition={{ duration: 0.2, ease: 'easeInOut' }}
       className="relative h-full border-r border-argus-border flex-shrink-0 overflow-hidden"
       style={{ background: '#0d0d16' }}
     >
       {/* Collapsed strip */}
       <AnimatePresence>
-        {collapsed && (
+        {isCollapsed && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -53,7 +58,7 @@ export function EyesPanel() {
 
       {/* Full panel */}
       <AnimatePresence>
-        {!collapsed && (
+        {!isCollapsed && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
