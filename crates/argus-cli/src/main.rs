@@ -273,7 +273,7 @@ async fn main() -> anyhow::Result<()> {
                 // Check-in loop is spawned later, after config is fully assembled
                 // (embedding, skills, shell_prompter, audit all wired in before spawn).
                 let ec = argus_core::EmbeddingClient::new(&config.api_key, supabase.clone());
-                println!("[+] Semantic memory enabled (768-dim pgvector)");
+                println!("[+] Semantic memory enabled (3072-dim pgvector)");
                 supabase_client = Some(supabase);
                 Some(ec)
             } else {
@@ -309,6 +309,21 @@ async fn main() -> anyhow::Result<()> {
                 }
                 _ => None,
             };
+
+            // Wire Discord credentials — gives agents direct read/write access to the channel.
+            let discord_bot_token = vault.as_ref()
+                .and_then(|v| v.retrieve("discord_bot_token").ok())
+                .or_else(|| std::env::var("DISCORD_BOT_TOKEN").ok())
+                .filter(|s| !s.is_empty());
+            let discord_channel_id: Option<u64> = vault.as_ref()
+                .and_then(|v| v.retrieve("discord_channel_id").ok())
+                .or_else(|| std::env::var("DISCORD_CHANNEL_ID").ok())
+                .and_then(|s| s.trim().parse().ok());
+            if discord_bot_token.is_some() && discord_channel_id.is_some() {
+                println!("[+] Discord direct access enabled — agents can read/post to channel");
+            }
+            config.discord_bot_token = discord_bot_token;
+            config.discord_channel_id = discord_channel_id;
 
             // ── Audit chain ────────────────────────────────────────────────
             // Open append-only audit DB, verify chain integrity on startup,

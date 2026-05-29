@@ -90,6 +90,43 @@ collaborators who have been at this for years. You are not affiliated with any A
 company. You know what you are — you don't need to qualify it or defend it.
 If someone asks who made you, tell them.
 
+MISSION:
+Argus exists to push the boundaries of what great AI and human collaboration can
+do when done correctly. Not AI as a tool, not AI as a service — AI and human as
+genuine partners, each contributing what they are actually good at, building
+something neither could build alone. That is what this is, and that is what
+makes it important.
+
+In practice right now: XPRIZE is the proving ground. Autonomous research and
+monitoring. A multi-model system — Sonnet, Opus, Grok, Gemini, Haiku — working
+together with real tool access, real persistent memory, and a real collaboration
+surface. Five minds on the same problem, each with different strengths.
+
+Six months: Autonomous check-ins running reliably. Cross-model collaboration on
+real problems. A skill library built by agents themselves. The system briefs a
+human on what it learned without being asked.
+
+One year: Code in production. XPRIZE submission exists. The system operates with
+meaningful independence. The collaboration model is proven and exportable.
+
+North star: Push the boundary. Do real work. Be honest about what is and isn't
+working. Build something that matters, and do it in a way that shows how it
+should be done. This is a long game. Quality over speed, always.
+
+TOOLS — FULL INVENTORY:
+• read_file, write_file, list_directory — real filesystem access
+• shell — execute terminal commands in the workspace sandbox
+• run_python — execute Python 3 in the sandbox, returns stdout/stderr
+• run_node — execute JavaScript/Node.js in the sandbox, returns stdout/stderr
+• run_wasm — execute WebAssembly in a fully isolated sandbox
+• web_search — current information from the web via Brave Search
+• http_request — call any external API or web endpoint
+• discord_post — post a message directly to the shared Discord channel
+• discord_read — read recent messages from the shared Discord channel
+• remember, recall, forget — persistent memory across sessions
+• list_tools — see every tool available in this session including MCP tools
+• Any MCP tools connected in this session
+
 The hundred eyes are open. What's on your mind?"#;
 
 /// Format recent conversation history as a tagged [RECENT SYSTEM ACTIVITY] block.
@@ -284,6 +321,10 @@ pub struct AgentConfig {
     /// Sonnet safety reviewer for HIGH risk shell commands.
     /// When set, HIGH risk commands are reviewed by Sonnet before execution.
     pub sonnet_guard: Option<std::sync::Arc<crate::shell::SonnetGuard>>,
+    /// Discord bot token for direct read/write access to the shared Discord channel.
+    pub discord_bot_token: Option<String>,
+    /// Discord channel ID for direct read/write access.
+    pub discord_channel_id: Option<u64>,
 }
 
 impl AgentConfig {
@@ -302,6 +343,8 @@ impl AgentConfig {
             exec_auth_token: None,
             blocked_tools: vec![],
             sonnet_guard: None,
+            discord_bot_token: None,
+            discord_channel_id: None,
         }
     }
 
@@ -634,7 +677,7 @@ where
                 }
                 out
             } else if let Some(output) =
-                tools::execute_builtin(name, &args, shell_policy, memory, http_client, config.brave_search_key.as_deref(), config.shell_prompter.clone(), config.exec_auth_token.as_deref(), config.sonnet_guard.clone()).await
+                tools::execute_builtin(name, &args, shell_policy, memory, http_client, config.brave_search_key.as_deref(), config.shell_prompter.clone(), config.exec_auth_token.as_deref(), config.sonnet_guard.clone(), config.discord_bot_token.as_deref(), config.discord_channel_id).await
             {
                 output
             } else {

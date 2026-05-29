@@ -184,8 +184,35 @@ pub fn builtin_tool_schemas() -> Vec<Value> {
         {
             "type": "function",
             "function": {
+                "name": "discord_post",
+                "description": "Post a message directly to the shared Argus Discord channel. Use this to coordinate with other instances of Argus, share findings, or leave a record of your work.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "message": { "type": "string", "description": "The message to post to Discord" }
+                    },
+                    "required": ["message"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "discord_read",
+                "description": "Read recent messages from the shared Argus Discord channel. Use this to see what other instances of Argus have posted, check current discussion, or catch up on activity since your last turn.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "limit": { "type": "number", "description": "Number of recent messages to retrieve (default 20, max 50)" }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "list_tools",
-                "description": "List every tool available to you in this session — built-ins (shell, web_search, memory, file ops, http) plus any MCP-connected tools. Call this when you need to know your full capabilities.",
+                "description": "List every tool available to you in this session — built-ins (shell, web_search, memory, file ops, http, discord) plus any MCP-connected tools. Call this when you need to know your full capabilities.",
                 "parameters": {
                     "type": "object",
                     "properties": {}
@@ -230,6 +257,8 @@ pub async fn execute_builtin(
     shell_prompter: Option<std::sync::Arc<dyn PermissionPrompter>>,
     exec_auth_token: Option<&str>,
     sonnet_guard: Option<std::sync::Arc<crate::shell::SonnetGuard>>,
+    discord_bot_token: Option<&str>,
+    discord_channel_id: Option<u64>,
 ) -> Option<String> {
     match name {
         "read_file"      => Some(tool_read_file(args)),
@@ -244,6 +273,8 @@ pub async fn execute_builtin(
         "run_python"     => Some(tool_run_code("python", args, http_client, exec_auth_token).await),
         "run_node"       => Some(tool_run_code("javascript", args, http_client, exec_auth_token).await),
         "run_wasm"       => Some(tool_run_wasm(args).await),
+        "discord_post"   => Some(tool_discord_post(args, http_client, discord_bot_token, discord_channel_id).await),
+        "discord_read"   => Some(tool_discord_read(args, http_client, discord_bot_token, discord_channel_id).await),
         "list_tools"     => Some("Use the tool schemas you already have — this meta-tool is informational only.".to_string()),
         _                => None,
     }
@@ -755,6 +786,112 @@ async fn tool_http_request(args: &Value, client: &reqwest::Client) -> String {
                         body
                     };
                     format!("HTTP {}\n\n{}", status, truncated)
+                }
+            }
+        }
+    }
+}
+
+// ── Discord tools ──────────────────────────────────────────────────────────
+
+async fn tool_discord_post(
+    args: &Value,
+    client: &reqwest::Client,
+    bot_token: Option<&str>,
+    channel_id: Option<u64>,
+) -> String {
+    let token = match bot_token {
+        Some(t) if !t.is_empty() => t,
+        _ => return "discord_post not configured — DISCORD_BOT_TOKEN is not set.".to_string(),
+    };
+    let channel = match channel_id {
+        Some(id) => id,
+        None => return "discord_post not configured — DISCORD_CHANNEL_ID is not set.".to_string(),
+    };
+    let message = args["message"].as_str().unwrap_or("").trim();
+    if message.is_empty() {
+        return "No message provided".to_string();
+    }
+
+    let url = format!("https://discord.com/api/v10/channels/{}/messages", channel);
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bot {}", token))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({ "content": message }))
+        .send()
+        .await;
+
+    match resp {
+        Err(e) => format!("Discord post failed: {}", e),
+        Ok(r) => {
+            let status = r.status();
+            if status.is_success() || status.as_u16() == 200 {
+                "Posted to Discord.".to_string()
+            } else {
+                let body = r.text().await.unwrap_or_default();
+                format!("Discord API error {}: {}", status, body)
+            }
+        }
+    }
+}
+
+async fn tool_discord_read(
+    args: &Value,
+    client: &reqwest::Client,
+    bot_token: Option<&str>,
+    channel_id: Option<u64>,
+) -> String {
+    let token = match bot_token {
+        Some(t) if !t.is_empty() => t,
+        _ => return "discord_read not configured — DISCORD_BOT_TOKEN is not set.".to_string(),
+    };
+    let channel = match channel_id {
+        Some(id) => id,
+        None => return "discord_read not configured — DISCORD_CHANNEL_ID is not set.".to_string(),
+    };
+    let limit = args["limit"].as_u64().unwrap_or(20).min(50);
+
+    let url = format!(
+        "https://discord.com/api/v10/channels/{}/messages?limit={}",
+        channel, limit
+    );
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bot {}", token))
+        .send()
+        .await;
+
+    match resp {
+        Err(e) => format!("Discord read failed: {}", e),
+        Ok(r) => {
+            let status = r.status();
+            if !status.is_success() {
+                let body = r.text().await.unwrap_or_default();
+                return format!("Discord API error {}: {}", status, body);
+            }
+            match r.json::<serde_json::Value>().await {
+                Err(e) => format!("Discord parse error: {}", e),
+                Ok(msgs) => {
+                    let messages = match msgs.as_array() {
+                        Some(a) => a,
+                        None => return "Unexpected Discord response format".to_string(),
+                    };
+                    if messages.is_empty() {
+                        return "No recent messages in this channel.".to_string();
+                    }
+                    // Discord returns newest-first; reverse for chronological reading
+                    let mut lines = vec![format!("── {} recent Discord messages ──", messages.len())];
+                    for msg in messages.iter().rev() {
+                        let author = msg["author"]["username"].as_str().unwrap_or("unknown");
+                        let content = msg["content"].as_str().unwrap_or("(no content)");
+                        let ts = msg["timestamp"].as_str()
+                            .and_then(|s| s.get(11..16))
+                            .unwrap_or("--:--");
+                        lines.push(format!("[{} | {}]: {}", author, ts, content));
+                    }
+                    lines.push("── end ──".to_string());
+                    lines.join("\n")
                 }
             }
         }
