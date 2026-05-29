@@ -87,5 +87,25 @@ MISSION
     echo "[workspace-init] MISSION.md written"
 fi
 
+# ── Argus source code access ──────────────────────────────────────────────────
+# Clone the Argus1 source repo so agents can read and propose changes to their own code.
+# If GITHUB_TOKEN is set, configure it for authenticated pushes.
+if [ ! -d "$WORKSPACE/argus1/.git" ]; then
+    echo "[workspace-init] Cloning Argus1 source repo..."
+    if [ -n "$GITHUB_TOKEN" ]; then
+        git clone "https://${GITHUB_TOKEN}@github.com/HeyBatlle1/Argus1.git" "$WORKSPACE/argus1" 2>/dev/null \
+            && echo "[workspace-init] Argus1 repo cloned (authenticated)" \
+            || echo "[workspace-init] Argus1 clone failed — continuing without"
+    else
+        git clone "https://github.com/HeyBatlle1/Argus1.git" "$WORKSPACE/argus1" 2>/dev/null \
+            && echo "[workspace-init] Argus1 repo cloned (read-only)" \
+            || echo "[workspace-init] Argus1 clone failed — continuing without"
+    fi
+else
+    git -C "$WORKSPACE/argus1" pull --ff-only 2>/dev/null \
+        && echo "[workspace-init] Argus1 repo updated" \
+        || echo "[workspace-init] Argus1 pull skipped (diverged or no network)"
+fi
+
 # ── Start exec server ──────────────────────────────────────────────────────────
 exec python3 /workspace_exec_server.py

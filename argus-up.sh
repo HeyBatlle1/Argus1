@@ -19,6 +19,7 @@ if [ -f "$BINARY" ]; then
   export BRAVE_SEARCH_API_KEY=$("$BINARY" vault get brave_search_api_key 2>/dev/null || echo "")
   export DISCORD_BOT_TOKEN=$("$BINARY" vault get discord_bot_token 2>/dev/null || echo "")
   export DISCORD_CHANNEL_ID=$("$BINARY" vault get discord_channel_id 2>/dev/null || echo "")
+  export GITHUB_TOKEN=$("$BINARY" vault get github_token 2>/dev/null || echo "")
   echo "[+] Loaded from vault binary"
 
 # Strategy 2: macOS Keychain fallback (when binary not built)
@@ -63,8 +64,8 @@ if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
   echo "[!] TELEGRAM_BOT_TOKEN is empty — Telegram will be disabled"
 fi
 
-echo "[+] Secrets loaded — starting Argus stack..."
-docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d "$@"
+echo "[+] Secrets loaded — building and starting Argus stack..."
+docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d --build "$@"
 echo ""
 echo "[+] Argus is up."
 echo "    Frontend: http://localhost:3000"

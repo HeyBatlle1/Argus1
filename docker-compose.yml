@@ -67,6 +67,7 @@ services:
       - workspace:/workspace
     environment:
       - WORKSPACE_EXEC_TOKEN=${WORKSPACE_EXEC_TOKEN:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
     ports:
       - "8081:8081"   # Static file server — agent-created HTML pages (browsable on host)
     expose:
