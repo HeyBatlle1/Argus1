@@ -20,7 +20,7 @@ export const MODEL_CONFIG: Record<ModelId, ModelConfig> = {
     icon: '👑',
     color: '#c9a84c',
     provider: 'anthropic',
-    openRouterId: 'anthropic/claude-haiku-4-5',
+    openRouterId: '~anthropic/claude-haiku-latest',
   },
   'claude-sonnet': {
     id: 'claude-sonnet',
@@ -52,15 +52,15 @@ export const MODEL_CONFIG: Record<ModelId, ModelConfig> = {
     provider: 'xai',
     openRouterId: 'x-ai/grok-4.3',
   },
-  'grok-fast': {
-    id: 'grok-fast',
-    name: 'Grok 4.20',
+  'grok-build': {
+    id: 'grok-build',
+    name: 'Grok Build',
     tier: 'allied',
     tierLabel: 'Allied',
     icon: '🛡',
     color: '#39d353',
     provider: 'xai',
-    openRouterId: 'x-ai/grok-4.20',
+    openRouterId: 'x-ai/grok-build-0.1',
   },
   'grok-multi': {
     id: 'grok-multi',
@@ -74,13 +74,13 @@ export const MODEL_CONFIG: Record<ModelId, ModelConfig> = {
   },
   'gemini-flash': {
     id: 'gemini-flash',
-    name: 'Gemini 3.1',
+    name: 'Gemini Flash',
     tier: 'allied',
     tierLabel: 'Allied',
     icon: '🛡',
     color: '#39d353',
     provider: 'google',
-    openRouterId: 'google/gemini-3.1-pro-preview',
+    openRouterId: 'google/gemini-3.1-flash-lite',
   },
 };
 
@@ -89,7 +89,7 @@ export const MODELS_IN_ORDER: ModelId[] = [
   'claude-sonnet',
   'claude-opus',
   'grok',
-  'grok-fast',
+  'grok-build',
   'grok-multi',
   'gemini-flash',
 ];

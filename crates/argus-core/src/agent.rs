@@ -214,23 +214,23 @@ pub struct ConversationMessage {
 }
 
 // ── Model constants ────────────────────────────────────────────────────────
-pub const MODEL_HAIKU:  &str = "anthropic/claude-haiku-4-5";
+pub const MODEL_HAIKU:  &str = "~anthropic/claude-haiku-latest";
 pub const MODEL_SONNET: &str = "anthropic/claude-sonnet-4-6";
 pub const MODEL_OPUS:   &str = "anthropic/claude-opus-4-7";
 pub const MODEL_GROK:       &str = "x-ai/grok-4.3";
-pub const MODEL_GROK_FAST:  &str = "x-ai/grok-4.20";
+pub const MODEL_GROK_BUILD: &str = "x-ai/grok-build-0.1";
 pub const MODEL_GROK_MULTI: &str = "x-ai/grok-4.20-multi-agent";
-pub const MODEL_GEMINI: &str = "google/gemini-3.1-pro-preview";
+pub const MODEL_GEMINI: &str = "google/gemini-3.1-flash-lite";
 
 pub fn model_label(model_id: &str) -> &'static str {
     match model_id {
-        MODEL_HAIKU  => "Haiku   (fast / cheap)",
+        MODEL_HAIKU  => "Haiku   (fast / daily check-in)",
         MODEL_SONNET => "Sonnet  (balanced)",
         MODEL_OPUS   => "Opus    (max intelligence)",
-        MODEL_GROK       => "Grok 4.3",
-        MODEL_GROK_FAST  => "Grok 4.20  (default)",
-        MODEL_GROK_MULTI => "Grok 4.20 Multi-Agent (no tools)",
-        MODEL_GEMINI => "Gemini  (Google Pro)",
+        MODEL_GROK        => "Grok 4.3",
+        MODEL_GROK_BUILD  => "Grok Build 0.1",
+        MODEL_GROK_MULTI  => "Grok 4.20 Multi-Agent (no tools)",
+        MODEL_GEMINI => "Gemini  (Flash Lite)",
         _            => "Unknown model",
     }
 }
@@ -275,7 +275,7 @@ impl AgentConfig {
         let brave_search_key = std::env::var("BRAVE_SEARCH_API_KEY").ok();
         Self {
             api_key,
-            model: MODEL_GROK_FAST.to_string(),
+            model: MODEL_GROK_BUILD.to_string(),
             api_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
             temperature: 0.7,
             brave_search_key,
@@ -303,10 +303,10 @@ impl AgentConfig {
         self.model = match self.model.as_str() {
             MODEL_HAIKU      => MODEL_SONNET.to_string(),
             MODEL_SONNET     => MODEL_OPUS.to_string(),
-            MODEL_OPUS       => MODEL_GROK.to_string(),
-            MODEL_GROK       => MODEL_GROK_FAST.to_string(),
-            MODEL_GROK_FAST  => MODEL_GROK_MULTI.to_string(),
-            MODEL_GROK_MULTI => MODEL_GEMINI.to_string(),
+            MODEL_OPUS        => MODEL_GROK.to_string(),
+            MODEL_GROK        => MODEL_GROK_BUILD.to_string(),
+            MODEL_GROK_BUILD  => MODEL_GROK_MULTI.to_string(),
+            MODEL_GROK_MULTI  => MODEL_GEMINI.to_string(),
             _                => MODEL_HAIKU.to_string(),  // gemini and any unknown → back to haiku
         };
         &self.model
@@ -318,7 +318,7 @@ impl AgentConfig {
             "sonnet" | MODEL_SONNET => MODEL_SONNET.to_string(),
             "opus"   | MODEL_OPUS   => MODEL_OPUS.to_string(),
             "grok"       | MODEL_GROK       => MODEL_GROK.to_string(),
-            "grok-fast"  | MODEL_GROK_FAST  => MODEL_GROK_FAST.to_string(),
+            "grok-build"  | MODEL_GROK_BUILD  => MODEL_GROK_BUILD.to_string(),
             "grok-multi" | MODEL_GROK_MULTI => MODEL_GROK_MULTI.to_string(),
             "gemini"     | MODEL_GEMINI     => MODEL_GEMINI.to_string(),
             other => return Err(format!(

@@ -16,7 +16,7 @@ const MEETING_BRIEF_PANE1 =
 
 const MEETING_BRIEFS: Record<2 | 3 | 4, { model: ModelId; brief: string }> = {
   2: {
-    model: 'grok-fast',
+    model: 'grok-build',
     brief:
       'MONTHLY MEETING — AI LANDSCAPE INTEL: You are Grok, Argus\'s AI landscape analyst. Research and report on: (1) The 3 most significant AI model releases or capability jumps in the past 30 days, (2) Any major safety incidents, alignment research, or policy developments, (3) One "signal to watch" — an emerging trend that isn\'t mainstream yet. Format as a concise briefing. Post your findings to Discord when done.',
   },
@@ -44,7 +44,7 @@ export default function Home() {
     index: number;
   } | null>(null);
 
-  const [pane2Model] = useState<ModelId>('grok-fast');
+  const [pane2Model] = useState<ModelId>('grok-build');
   const [pane3Model] = useState<ModelId>('gemini-flash');
 
   function openArtifact(artifacts: Artifact[], index: number) {

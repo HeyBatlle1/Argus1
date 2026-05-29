@@ -135,7 +135,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   // Agent state — prod starts watching, dev same
   eyeState: 'watching',
-  activeModel: 'grok-fast',
+  activeModel: 'grok-build',
   accessTier: 'royal',
   isStreaming: false,
 

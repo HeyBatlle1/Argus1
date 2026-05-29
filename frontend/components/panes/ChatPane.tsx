@@ -25,7 +25,7 @@ interface Props {
   openingBrief?: string;
 }
 
-export function ChatPane({ paneIndex, initialModel = 'grok-fast', onClose, openingBrief }: Props) {
+export function ChatPane({ paneIndex, initialModel = 'grok-build', onClose, openingBrief }: Props) {
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState('');

@@ -34,7 +34,7 @@
 //!
 //! Alert messages suppress the finding — the alert takes priority.
 
-use argus_core::agent::{AgentConfig, AgentEvent, MODEL_GEMINI, MODEL_OPUS, MODEL_SONNET};
+use argus_core::agent::{AgentConfig, AgentEvent, MODEL_GEMINI, MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET};
 use argus_core::mcp::McpClient;
 use argus_core::shell::ShellPolicy;
 use argus_core::supabase::{CheckinLogEntry, DiscoursePost, SupabaseClient};
@@ -280,7 +280,13 @@ async fn run_agent_checkin(
         };
         &weekly_config
     } else {
-        config
+        // Daily heartbeat uses Haiku — fast, cheap, purpose-built for routine status checks.
+        // Weekly sweep and alerts rotate through heavier models.
+        weekly_config = AgentConfig {
+            model: MODEL_HAIKU.to_string(),
+            ..config.clone()
+        };
+        &weekly_config
     };
 
     // ── Build prompt ─────────────────────────────────────────────────────

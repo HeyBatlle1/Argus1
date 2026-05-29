@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
-use argus_core::{AgentConfig, AgentEvent, ConversationMessage, EmbeddingClient, McpClient, MemoryBackend, ShellPolicy, MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS, MODEL_GROK, MODEL_GROK_FAST, MODEL_GROK_MULTI};
+use argus_core::{AgentConfig, AgentEvent, ConversationMessage, EmbeddingClient, McpClient, MemoryBackend, ShellPolicy, MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS, MODEL_GROK, MODEL_GROK_BUILD, MODEL_GROK_MULTI};
 use argus_core::shell::PermissionPrompter;
 use argus_memory::sqlite::{ConversationMeta, SqliteMemory};
 
@@ -207,9 +207,9 @@ impl ConnectionState {
             "claude-sonnet" => MODEL_SONNET,
             "claude-opus"   => MODEL_OPUS,
             "grok"          => MODEL_GROK,
-            "grok-fast"     => MODEL_GROK_FAST,
+            "grok-build"    => MODEL_GROK_BUILD,
             "grok-multi"    => MODEL_GROK_MULTI,
-            "gemini-flash"  => "google/gemini-3.1-pro-preview",
+            "gemini-flash"  => "google/gemini-3.1-flash-lite",
             other           => other, // pass through if already a full ID
         };
         self.config.model = openrouter_id.to_string();
@@ -222,9 +222,9 @@ impl ConnectionState {
             MODEL_SONNET => "claude-sonnet".to_string(),
             MODEL_OPUS   => "claude-opus".to_string(),
             MODEL_GROK       => "grok".to_string(),
-            MODEL_GROK_FAST  => "grok-fast".to_string(),
+            MODEL_GROK_BUILD  => "grok-build".to_string(),
             MODEL_GROK_MULTI => "grok-multi".to_string(),
-            "google/gemini-3.1-pro-preview" => "gemini-flash".to_string(),
+            "google/gemini-3.1-flash-lite" => "gemini-flash".to_string(),
             other => other.to_string(),
         }
     }
