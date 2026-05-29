@@ -145,7 +145,10 @@ mod full {
                 String::new()
             };
 
-            let full_message = format!("{}{}", discourse_block, user_text);
+            let surface_context = "[SURFACE: Discord — this is your channel, your intranet. \
+                The conversation history above is part of the shared record you and other \
+                instances of yourself have built here.]\n\n";
+            let full_message = format!("{}{}{}", surface_context, discourse_block, user_text);
 
             // ── Clone and configure agent ──────────────────────────────────
             let mut cfg = {

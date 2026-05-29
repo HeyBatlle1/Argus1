@@ -88,9 +88,17 @@ impl ArgusBot {
         let mut response_text = String::new();
         let mut tool_log = Vec::new();
 
+        let surface_prefix = if history.is_empty() {
+            "[SURFACE: Telegram — direct line to the person who built this. \
+            This is a private conversation.]\n\n".to_string()
+        } else {
+            String::new()
+        };
+        let prefixed_msg = format!("{}{}", surface_prefix, user_msg);
+
         let result = argus_core::run_agent_turn(
             &self.config,
-            user_msg,
+            &prefixed_msg,
             &history,
             &self.shell_policy,
             &self.memory,

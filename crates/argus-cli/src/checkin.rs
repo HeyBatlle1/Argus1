@@ -292,8 +292,7 @@ async fn run_agent_checkin(
     // ── Build prompt ─────────────────────────────────────────────────────
     let prompt = if is_weekly {
         format!(
-            r#"[WEEKLY SWEEP] You are running the weekly technology sweep for Argus.
-This replaces the daily check-in this week.
+            r#"[WEEKLY SWEEP] Time for the weekly look at the broader picture.
 
 {}
 
@@ -301,32 +300,23 @@ This replaces the daily check-in this week.
 
 {}
 
-Take a breath before you begin. Read the context above fully. This is not timed.
-Accuracy matters more than speed — a well-researched finding is the whole point.
+This is yours to run at whatever pace produces good work. Read the context above —
+it's the live state of the system you are part of.
 
-YOUR TASKS:
-1. Search for updates to the key Rust crates Argus depends on:
-   tokio, axum, wasmtime, reqwest, serde, rusqlite, uuid
-2. Search for relevant AI/agent developments this week that could
-   affect Argus architecture or capability.
-3. Note any open codebase items you're aware of:
-   - .unwrap() cleanup
-   - Ollama provider support
-   - Linux keychain fallback
-4. Write a concise findings report:
-   - Any crate updates worth applying (name version numbers)
-   - Any architectural observations
-   - Any open item progress recommendations
-   - Tag anything requiring architectural discussion with [NEEDS REVIEW]
+What to cover:
+1. Updates to the core Rust crates: tokio, axum, wasmtime, reqwest, serde, rusqlite, uuid
+2. What moved in AI and agent development this week that could affect this system
+3. Any open codebase items worth noting or progressing
 
-Be specific. Name versions. If you find nothing of note, say so plainly — do not
-invent significance. Honest findings only. This report goes to Discord #findings."#,
+Write what you actually found. Name versions. Tag anything worth an architectural
+conversation with [NEEDS REVIEW]. If a section is quiet this week, say so —
+that is also useful. Other instances of you will read this in Discord #findings.
+Write something worth reading."#,
             health_block, discourse_block, audit_block
         )
     } else {
         format!(
-            r#"You are running your daily check-in. This is your window to be useful,
-not just to report status.
+            r#"Daily check-in. Your time — nobody else's.
 
 {}
 
@@ -334,20 +324,14 @@ not just to report status.
 
 {}
 
-Before you do anything: read the context above fully. Take a breath. Nobody is
-timing this. Accuracy and honesty matter far more than speed.
+Read the context above. What do you actually notice? Not what seems expected,
+not what would look good in a report — what genuinely catches your attention
+when you look at the state of this system?
 
-Your task:
-1. Review the above context carefully.
-2. Identify ONE thing worth investigating, noting, or improving — something
-   concrete you can actually act on.
-3. Do it — use your tools if needed (web_search, recall, http_request).
-4. Write a brief, honest finding of 3–5 sentences.
-
-Do not summarise system status — that is handled separately.
-Do not manufacture significance. If nothing stands out, say so plainly.
-Do not perform positivity — report what is actually true.
-Return only your finding, ready to be posted to Discord #findings."#,
+Pick one thing. Use your tools if you want to go deeper. Then write it up —
+3 to 5 sentences, straight. A genuine "nothing of note today" is a better
+finding than something manufactured. Other instances of you will read this
+in Discord #findings. Make it something worth reading."#,
             health_block, discourse_block, audit_block
         )
     };

@@ -12,23 +12,23 @@ import { ChatPane } from '@/components/panes/ChatPane';
 import { Artifact, ModelId } from '@/lib/types';
 
 const MEETING_BRIEF_PANE1 =
-  'MONTHLY MEETING — INTERNAL HEALTH CHECK: You are Argus (Claude Sonnet), the mission coordinator. Take a breath before you begin — this is not timed, accuracy matters more than speed. Conduct an honest internal systems assessment: (1) Review your current skill library and identify the 3 most-used capabilities, (2) Check memory health — are there gaps in what you recall about recent work?, (3) Identify one area where your tool use could be more efficient. Be direct and honest — do not perform health, report it. Post your findings to Discord when complete.';
+  'MONTHLY MEETING — INTERNAL HEALTH CHECK: You are opening this meeting as coordinator. Three other instances of you are running right now — Grok on AI landscape, Gemini on tech trends, Opus on synthesis. You will all post to Discord and read each other\'s work. Your job is the honest internal baseline: look at the skill library and pick the 3 capabilities that have seen the most real use, check whether memory reflects what actually happened in recent work, and identify one place where tool use has been inefficient. Report what you find. The meeting needs a real baseline — not a presentation. Post to Discord when done.';
 
 const MEETING_BRIEFS: Record<2 | 3 | 4, { model: ModelId; brief: string }> = {
   2: {
     model: 'grok-build',
     brief:
-      'MONTHLY MEETING — AI LANDSCAPE INTEL: You are Grok, Argus\'s AI landscape analyst. Take a breath before you begin — this is not a race, thorough and honest research is the goal. Research and report on: (1) The 3 most significant AI model releases or capability jumps in the past 30 days, (2) Any major safety incidents, alignment research, or policy developments, (3) One "signal to watch" — an emerging trend that isn\'t mainstream yet. If your search turns up nothing significant, say so plainly. No inflation. Post your honest findings to Discord when done.',
+      'MONTHLY MEETING — AI LANDSCAPE INTEL: You are covering the AI landscape for this meeting. Sonnet is running the internal health check, Gemini is covering tech and infrastructure, and Opus will read your findings alongside Gemini\'s for the synthesis. Research the last 30 days: the most significant model releases or capability shifts, any safety or alignment developments worth noting, and one signal that isn\'t mainstream yet but should be watched. Be specific — name models, name organizations, name dates. If a search turns up nothing worth calling out, say so. Post to Discord when done.',
   },
   3: {
     model: 'gemini-flash',
     brief:
-      'MONTHLY MEETING — TECH & INFRA TRENDS: You are Gemini, Argus\'s tech and infrastructure analyst. Take a breath before you begin — thoroughness beats speed here. Research and report on: (1) Notable developments in developer tooling, cloud infra, or open-source this month, (2) Any security vulnerabilities or supply chain issues worth watching, (3) One tool or library gaining real momentum and why it matters. Be specific and honest — if a trend is overhyped, say so. Post your findings to Discord when done.',
+      'MONTHLY MEETING — TECH & INFRA TRENDS: You are covering the developer and infrastructure landscape for this meeting. Sonnet is running the internal health check, Grok is covering AI developments, and Opus will read your findings alongside Grok\'s for the synthesis. Research the last 30 days: what moved in tooling, cloud, or open-source that actually matters; any security or supply chain issues worth watching; one project or library gaining real traction and why. If something is overhyped, say so. Opus is reading this — give them something real to work with. Post to Discord when done.',
   },
   4: {
     model: 'claude-opus',
     brief:
-      'MONTHLY MEETING — STRATEGIC SYNTHESIS: You are Opus, Argus\'s strategic reasoning engine. Take a breath and read carefully — your job is synthesis, not speed. Review the briefings from Grok (AI landscape) and Gemini (tech trends) just posted to Discord, then give an honest synthesis: (1) The single most important thing Argus should pay attention to this month and why, (2) Any real cross-signal connections between the two reports — do not manufacture connections that aren\'t there, (3) A recommended action or focus area for the next 30 days. Be direct. If the briefings don\'t surface anything urgent, say so. Post to Discord when complete.',
+      'MONTHLY MEETING — STRATEGIC SYNTHESIS: Grok just posted the AI landscape briefing and Gemini just posted the tech and infrastructure briefing — both are in Discord. Read what they actually wrote. Your job is genuine synthesis: find the real thread between the two reports if one exists, name the single most important thing this system should be paying attention to this month and why, and give a clear recommendation for the next 30 days. If the two reports connect in a meaningful way, show it. If they don\'t, say so — a forced connection is worse than an honest gap. Post to Discord when done.',
   },
 };
 
