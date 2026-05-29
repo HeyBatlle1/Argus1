@@ -157,15 +157,19 @@ impl ConnectionState {
         exec_auth_token: Option<String>,
         embedding: Option<EmbeddingClient>,
         audit: Option<std::sync::Arc<argus_audit::AuditChain>>,
+        discord_bot_token: Option<String>,
+        discord_channel_id: Option<u64>,
     ) -> anyhow::Result<Self> {
         let mut config = AgentConfig::new(api_key);
         if let Some(k) = brave_key {
             config.brave_search_key = Some(k);
         }
-        config.shell_prompter  = shell_prompter;
-        config.exec_auth_token = exec_auth_token;
-        config.embedding       = embedding;
-        config.audit           = audit;
+        config.shell_prompter     = shell_prompter;
+        config.exec_auth_token    = exec_auth_token;
+        config.embedding          = embedding;
+        config.audit              = audit;
+        config.discord_bot_token  = discord_bot_token;
+        config.discord_channel_id = discord_channel_id;
 
         let memory = SqliteMemory::open_default()
             .map_err(|e| anyhow::anyhow!("Memory init failed: {}", e))?;
@@ -240,10 +244,12 @@ struct AppState {
     vault_keys: Vec<String>,
     // Daemon-level capabilities forwarded to every WebSocket connection.
     // All are Arc-wrapped so cloning is cheap.
-    shell_prompter:  Option<std::sync::Arc<dyn PermissionPrompter>>,
-    exec_auth_token: Option<String>,
-    embedding:       Option<EmbeddingClient>,
-    audit:           Option<std::sync::Arc<argus_audit::AuditChain>>,
+    shell_prompter:     Option<std::sync::Arc<dyn PermissionPrompter>>,
+    exec_auth_token:    Option<String>,
+    embedding:          Option<EmbeddingClient>,
+    audit:              Option<std::sync::Arc<argus_audit::AuditChain>>,
+    discord_bot_token:  Option<String>,
+    discord_channel_id: Option<u64>,
 }
 
 // ─── Router ────────────────────────────────────────────────────────────────
@@ -254,13 +260,15 @@ pub async fn run_web_server(
     vault_keys: Vec<String>,
 ) -> anyhow::Result<()> {
     let state = Arc::new(AppState {
-        api_key:         config.api_key,
-        brave_key:       config.brave_search_key,
+        api_key:            config.api_key,
+        brave_key:          config.brave_search_key,
         vault_keys,
-        shell_prompter:  config.shell_prompter,
-        exec_auth_token: config.exec_auth_token,
-        embedding:       config.embedding,
-        audit:           config.audit,
+        shell_prompter:     config.shell_prompter,
+        exec_auth_token:    config.exec_auth_token,
+        embedding:          config.embedding,
+        audit:              config.audit,
+        discord_bot_token:  config.discord_bot_token,
+        discord_channel_id: config.discord_channel_id,
     });
 
     let cors = CorsLayer::new()
@@ -468,6 +476,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         state.exec_auth_token.clone(),
         state.embedding.clone(),
         state.audit.clone(),
+        state.discord_bot_token.clone(),
+        state.discord_channel_id,
     ) {
         Ok(c) => c,
         Err(e) => {
