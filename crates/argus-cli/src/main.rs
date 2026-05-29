@@ -257,7 +257,8 @@ async fn main() -> anyhow::Result<()> {
 
             let bot_token = vault.as_ref()
                 .and_then(|v| v.retrieve("telegram_bot_token").ok())
-                .or_else(|| std::env::var("TELEGRAM_BOT_TOKEN").ok());
+                .or_else(|| std::env::var("TELEGRAM_BOT_TOKEN").ok())
+                .filter(|s| !s.is_empty());
 
             // Telegram chat ID for check-in messages (Bradlee's chat)
             let checkin_chat_id: Option<i64> = vault.as_ref()

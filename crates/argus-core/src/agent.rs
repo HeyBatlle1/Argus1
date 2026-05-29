@@ -159,6 +159,25 @@ fn build_system_prompt(
 }
 
 /// Truncate a string to at most `max_chars` Unicode scalar values.
+/// xAI (Grok) rejects `"additionalProperties": false` in tool schemas.
+/// Recursively remove it so the schema stays valid for xAI's validator.
+fn strip_additional_properties_false(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in map {
+                if k == "additionalProperties" {
+                    if v == &Value::Bool(false) { continue; }
+                }
+                out.insert(k.clone(), strip_additional_properties_false(v));
+            }
+            Value::Object(out)
+        }
+        Value::Array(arr) => Value::Array(arr.iter().map(strip_additional_properties_false).collect()),
+        other => other.clone(),
+    }
+}
+
 fn truncate_chars(s: &str, max_chars: usize) -> &str {
     match s.char_indices().nth(max_chars) {
         Some((idx, _)) => &s[..idx],
@@ -493,7 +512,12 @@ where
             "temperature": config.temperature,
         });
         if model_supports_tools(&config.model) {
-            req_body["tools"] = serde_json::json!(tool_schemas);
+            let schemas = if config.model.starts_with("x-ai/") {
+                tool_schemas.iter().map(strip_additional_properties_false).collect::<Vec<_>>()
+            } else {
+                tool_schemas.clone()
+            };
+            req_body["tools"] = serde_json::json!(schemas);
             req_body["tool_choice"] = serde_json::json!("auto");
         }
         let resp = http_client
