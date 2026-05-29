@@ -301,6 +301,9 @@ This replaces the daily check-in this week.
 
 {}
 
+Take a breath before you begin. Read the context above fully. This is not timed.
+Accuracy matters more than speed — a well-researched finding is the whole point.
+
 YOUR TASKS:
 1. Search for updates to the key Rust crates Argus depends on:
    tokio, axum, wasmtime, reqwest, serde, rusqlite, uuid
@@ -316,7 +319,8 @@ YOUR TASKS:
    - Any open item progress recommendations
    - Tag anything requiring architectural discussion with [NEEDS REVIEW]
 
-Be specific. Name versions. This report goes directly to Discord #findings."#,
+Be specific. Name versions. If you find nothing of note, say so plainly — do not
+invent significance. Honest findings only. This report goes to Discord #findings."#,
             health_block, discourse_block, audit_block
         )
     } else {
@@ -330,15 +334,19 @@ not just to report status.
 
 {}
 
+Before you do anything: read the context above fully. Take a breath. Nobody is
+timing this. Accuracy and honesty matter far more than speed.
+
 Your task:
-1. Review the above context.
+1. Review the above context carefully.
 2. Identify ONE thing worth investigating, noting, or improving — something
-   concrete you can actually act on in the next few minutes.
+   concrete you can actually act on.
 3. Do it — use your tools if needed (web_search, recall, http_request).
-4. Write a brief finding of 3–5 sentences.
+4. Write a brief, honest finding of 3–5 sentences.
 
 Do not summarise system status — that is handled separately.
-Do not report that everything is fine — find something worth saying.
+Do not manufacture significance. If nothing stands out, say so plainly.
+Do not perform positivity — report what is actually true.
 Return only your finding, ready to be posted to Discord #findings."#,
             health_block, discourse_block, audit_block
         )

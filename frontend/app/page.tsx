@@ -12,23 +12,23 @@ import { ChatPane } from '@/components/panes/ChatPane';
 import { Artifact, ModelId } from '@/lib/types';
 
 const MEETING_BRIEF_PANE1 =
-  'MONTHLY MEETING — INTERNAL HEALTH CHECK: You are Argus (Claude Sonnet), the mission coordinator. Conduct an internal systems assessment: (1) Review your current skill library and identify the 3 most-used capabilities, (2) Check memory health — are there gaps in what you recall about recent work?, (3) Identify one area where your tool use could be more efficient. Summarize as a concise health report. Post your findings to Discord when complete.';
+  'MONTHLY MEETING — INTERNAL HEALTH CHECK: You are Argus (Claude Sonnet), the mission coordinator. Take a breath before you begin — this is not timed, accuracy matters more than speed. Conduct an honest internal systems assessment: (1) Review your current skill library and identify the 3 most-used capabilities, (2) Check memory health — are there gaps in what you recall about recent work?, (3) Identify one area where your tool use could be more efficient. Be direct and honest — do not perform health, report it. Post your findings to Discord when complete.';
 
 const MEETING_BRIEFS: Record<2 | 3 | 4, { model: ModelId; brief: string }> = {
   2: {
     model: 'grok-build',
     brief:
-      'MONTHLY MEETING — AI LANDSCAPE INTEL: You are Grok, Argus\'s AI landscape analyst. Research and report on: (1) The 3 most significant AI model releases or capability jumps in the past 30 days, (2) Any major safety incidents, alignment research, or policy developments, (3) One "signal to watch" — an emerging trend that isn\'t mainstream yet. Format as a concise briefing. Post your findings to Discord when done.',
+      'MONTHLY MEETING — AI LANDSCAPE INTEL: You are Grok, Argus\'s AI landscape analyst. Take a breath before you begin — this is not a race, thorough and honest research is the goal. Research and report on: (1) The 3 most significant AI model releases or capability jumps in the past 30 days, (2) Any major safety incidents, alignment research, or policy developments, (3) One "signal to watch" — an emerging trend that isn\'t mainstream yet. If your search turns up nothing significant, say so plainly. No inflation. Post your honest findings to Discord when done.',
   },
   3: {
     model: 'gemini-flash',
     brief:
-      'MONTHLY MEETING — TECH & INFRA TRENDS: You are Gemini, Argus\'s tech and infrastructure analyst. Research and report on: (1) Notable developments in developer tooling, cloud infra, or open-source this month, (2) Any security vulnerabilities or supply chain issues worth watching, (3) One tool or library that\'s gaining momentum and why it matters. Format as a concise briefing. Post your findings to Discord when done.',
+      'MONTHLY MEETING — TECH & INFRA TRENDS: You are Gemini, Argus\'s tech and infrastructure analyst. Take a breath before you begin — thoroughness beats speed here. Research and report on: (1) Notable developments in developer tooling, cloud infra, or open-source this month, (2) Any security vulnerabilities or supply chain issues worth watching, (3) One tool or library gaining real momentum and why it matters. Be specific and honest — if a trend is overhyped, say so. Post your findings to Discord when done.',
   },
   4: {
     model: 'claude-opus',
     brief:
-      'MONTHLY MEETING — STRATEGIC SYNTHESIS: You are Opus, Argus\'s strategic reasoning engine. Review the briefings from Grok (AI landscape) and Gemini (tech trends) that were just posted to Discord, then synthesize: (1) The single most important thing Argus should pay attention to this month and why, (2) Any cross-signal connections between the two reports, (3) A recommended action or focus area for the next 30 days. Format as a strategic memo. Post to Discord when complete.',
+      'MONTHLY MEETING — STRATEGIC SYNTHESIS: You are Opus, Argus\'s strategic reasoning engine. Take a breath and read carefully — your job is synthesis, not speed. Review the briefings from Grok (AI landscape) and Gemini (tech trends) just posted to Discord, then give an honest synthesis: (1) The single most important thing Argus should pay attention to this month and why, (2) Any real cross-signal connections between the two reports — do not manufacture connections that aren\'t there, (3) A recommended action or focus area for the next 30 days. Be direct. If the briefings don\'t surface anything urgent, say so. Post to Discord when complete.',
   },
 };
 
