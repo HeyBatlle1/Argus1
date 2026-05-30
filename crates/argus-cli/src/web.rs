@@ -610,34 +610,10 @@ async fn handle_user_message(
 ) {
     let _ = tx.send(ServerMessage::Thinking);
 
-    let (config_snapshot, history_snapshot) = {
+    let (agent_config, history_snapshot) = {
         let c = conn.lock().await;
-        (
-            (
-                c.config.api_key.clone(),
-                c.config.model.clone(),
-                c.config.api_url.clone(),
-                c.config.temperature,
-                c.config.brave_search_key.clone(),
-                // Daemon-level capabilities — Arc clones are O(1)
-                c.config.shell_prompter.clone(),
-                c.config.exec_auth_token.clone(),
-                c.config.embedding.clone(),
-                c.config.audit.clone(),
-            ),
-            c.history.clone(),
-        )
+        (c.config.clone(), c.history.clone())
     };
-
-    let mut agent_config = AgentConfig::new(config_snapshot.0);
-    agent_config.model           = config_snapshot.1;
-    agent_config.api_url         = config_snapshot.2;
-    agent_config.temperature     = config_snapshot.3;
-    agent_config.brave_search_key = config_snapshot.4;
-    agent_config.shell_prompter  = config_snapshot.5;
-    agent_config.exec_auth_token = config_snapshot.6;
-    agent_config.embedding       = config_snapshot.7;
-    agent_config.audit           = config_snapshot.8;
 
     let tx_clone = tx.clone();
 
