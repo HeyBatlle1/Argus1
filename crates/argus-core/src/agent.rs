@@ -267,6 +267,22 @@ fn strip_additional_properties_false(value: &Value) -> Value {
     }
 }
 
+/// Grok also rejects `"strict": true` in tool schemas — strip it the same way.
+fn strip_strict(value: Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in map {
+                if k == "strict" { continue; }
+                out.insert(k, strip_strict(v));
+            }
+            Value::Object(out)
+        }
+        Value::Array(arr) => Value::Array(arr.into_iter().map(strip_strict).collect()),
+        other => other,
+    }
+}
+
 fn truncate_chars(s: &str, max_chars: usize) -> &str {
     match s.char_indices().nth(max_chars) {
         Some((idx, _)) => &s[..idx],
@@ -607,13 +623,24 @@ where
             "temperature": config.temperature,
         });
         if model_supports_tools(&config.model) {
-            let schemas = if config.model.starts_with("x-ai/") {
+            let schemas = if config.model.starts_with("x-ai/") || config.model.starts_with("~x-ai/") {
+                // Grok rejects additionalProperties:false and strict:true — strip both
+                tool_schemas.iter()
+                    .map(strip_additional_properties_false)
+                    .map(|s| strip_strict(s))
+                    .collect::<Vec<_>>()
+            } else if config.model.starts_with("google/") || config.model.starts_with("~google/") {
+                // Gemini rejects additionalProperties:false in nested schemas
                 tool_schemas.iter().map(strip_additional_properties_false).collect::<Vec<_>>()
             } else {
                 tool_schemas.clone()
             };
             req_body["tools"] = serde_json::json!(schemas);
-            req_body["tool_choice"] = serde_json::json!("auto");
+            // Gemini does not support tool_choice as a string — omit it entirely.
+            // Anthropic and Grok accept "auto"; everything else: omit to be safe.
+            if !config.model.starts_with("google/") && !config.model.starts_with("~google/") {
+                req_body["tool_choice"] = serde_json::json!("auto");
+            }
         }
         let resp = http_client
             .post(&config.api_url)
