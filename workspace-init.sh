@@ -67,16 +67,19 @@ process.
 Do real work. Be honest. Build something that matters.
 This is a long game. Quality over speed, always.
 
-## How to connect this workspace to GitHub
+## Your code fork
 
-Any instance of Argus can run:
-```bash
-git remote add origin https://github.com/HeyBatlle1/YOUR-REPO-NAME.git
-git push -u origin main
-```
+You have a full local fork of your own source code at `/workspace/argus1/`.
+Branch: `workspace`. Push is disabled — this is intentional.
 
-Once a remote is set, all instances can commit and push from /workspace.
-Use `git log` to see the history of what has been built here.
+You can:
+- Read any file in the codebase
+- Make changes and commit them locally
+- Propose improvements via Discord with `[ARGUS IMPROVEMENT]`
+- Build and test ideas without affecting production
+
+Your proposals get reviewed and cherry-picked to the real repo by a human.
+This is how Argus evolves itself responsibly.
 
 ## Workspace structure
 
@@ -87,24 +90,43 @@ MISSION
     echo "[workspace-init] MISSION.md written"
 fi
 
-# ── Argus source code access ──────────────────────────────────────────────────
-# Clone the Argus1 source repo so agents can read and propose changes to their own code.
-# If GITHUB_TOKEN is set, configure it for authenticated pushes.
+# ── Argus source code fork ────────────────────────────────────────────────────
+# Agents get a real local fork of Argus1 they can commit to and work on freely.
+# Push is intentionally disabled — this is a working copy, not a deploy target.
+# Proposals that survive internal review get cherry-picked to the real repo by a human.
 if [ ! -d "$WORKSPACE/argus1/.git" ]; then
-    echo "[workspace-init] Cloning Argus1 source repo..."
+    echo "[workspace-init] Cloning Argus1 fork..."
     if [ -n "$GITHUB_TOKEN" ]; then
         git clone "https://${GITHUB_TOKEN}@github.com/HeyBatlle1/Argus1.git" "$WORKSPACE/argus1" 2>/dev/null \
-            && echo "[workspace-init] Argus1 repo cloned (authenticated)" \
-            || echo "[workspace-init] Argus1 clone failed — continuing without"
+            && echo "[workspace-init] Argus1 fork cloned (authenticated)" \
+            || echo "[workspace-init] Argus1 clone failed — continuing without source access"
     else
         git clone "https://github.com/HeyBatlle1/Argus1.git" "$WORKSPACE/argus1" 2>/dev/null \
-            && echo "[workspace-init] Argus1 repo cloned (read-only)" \
-            || echo "[workspace-init] Argus1 clone failed — continuing without"
+            && echo "[workspace-init] Argus1 fork cloned" \
+            || echo "[workspace-init] Argus1 clone failed — continuing without source access"
+    fi
+
+    if [ -d "$WORKSPACE/argus1/.git" ]; then
+        # Disable push — this is a local working fork, not a deploy channel
+        git -C "$WORKSPACE/argus1" remote set-url --push origin no_push
+        # Create a workspace branch for agent changes
+        git -C "$WORKSPACE/argus1" checkout -b workspace 2>/dev/null || true
+        git -C "$WORKSPACE/argus1" config user.name "Argus-Workspace"
+        git -C "$WORKSPACE/argus1" config user.email "workspace@argus.local"
+        echo "[workspace-init] Fork ready — branch: workspace, push: disabled"
+        echo "[workspace-init] Agents can commit freely. Changes reviewed before merging upstream."
     fi
 else
-    git -C "$WORKSPACE/argus1" pull --ff-only 2>/dev/null \
-        && echo "[workspace-init] Argus1 repo updated" \
-        || echo "[workspace-init] Argus1 pull skipped (diverged or no network)"
+    # Pull upstream changes onto main, don't touch the workspace branch
+    git -C "$WORKSPACE/argus1" fetch origin 2>/dev/null || true
+    CURRENT=$(git -C "$WORKSPACE/argus1" branch --show-current 2>/dev/null)
+    if [ "$CURRENT" = "main" ] || [ "$CURRENT" = "master" ]; then
+        git -C "$WORKSPACE/argus1" pull --ff-only 2>/dev/null \
+            && echo "[workspace-init] Argus1 fork updated from upstream" \
+            || echo "[workspace-init] Fork pull skipped"
+    else
+        echo "[workspace-init] Fork on branch '$CURRENT' — skipping upstream pull"
+    fi
 fi
 
 # ── Start exec server ──────────────────────────────────────────────────────────

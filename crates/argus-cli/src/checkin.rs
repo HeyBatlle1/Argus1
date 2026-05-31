@@ -34,7 +34,7 @@
 //!
 //! Alert messages suppress the finding — the alert takes priority.
 
-use argus_core::agent::{AgentConfig, AgentEvent, MODEL_GEMINI, MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET};
+use argus_core::agent::{AgentConfig, AgentEvent, MODEL_GEMINI, MODEL_GROK, MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET};
 use argus_core::mcp::McpClient;
 use argus_core::shell::ShellPolicy;
 use argus_core::supabase::{CheckinLogEntry, DiscoursePost, SupabaseClient};
@@ -72,6 +72,9 @@ async fn run_checkin_loop(
 ) {
     let client = Client::new();
     let mut last_daily: Option<NaiveDate> = None;
+    let mut last_exploration: Option<NaiveDate> = None;
+    // Tracks the 4-week cycle number of the last Opus synthesis run.
+    let mut last_synthesis_cycle: Option<u32> = None;
 
     loop {
         let checkin_cfg = supabase.read_checkin_config().await;
@@ -79,34 +82,46 @@ async fn run_checkin_loop(
         if checkin_cfg.telegram_enabled && !in_quiet_hours(&checkin_cfg) {
             let health = collect_system_health().await;
             let today = Local::now().date_naive();
+            let now = Local::now();
 
             let needs_alert = health.disk_pct > DISK_ALERT_PCT
                 || health.mem_pct > MEM_ALERT_PCT
                 || health.has_unhealthy_container;
 
-            // Daily heartbeat: first tick after midnight each calendar day
             let needs_daily = last_daily.map_or(true, |d| d < today);
+            let needs_exploration = last_exploration.map_or(true, |d| d < today);
 
-            // Weekly tech sweep: replaces the daily heartbeat on Sunday midnight.
-            // Rotates models by ISO week number so different models run each week.
-            let is_weekly_sweep = needs_daily && {
-                let now = Local::now();
-                now.weekday() == chrono::Weekday::Sun && now.hour() == 0
-            };
+            // Weekly research sweep: Sunday midnight, rotates model each week.
+            let is_weekly_sweep = needs_daily
+                && now.weekday() == chrono::Weekday::Sun
+                && now.hour() == 0;
+
+            // Monthly Opus synthesis: fires at the start of each new 4-week cycle
+            // (when cycle_week == 0, i.e. weeks 1, 5, 9, 13… of the year).
+            let week_num = now.iso_week().week();
+            let current_cycle = (week_num - 1) / 4;
+            let is_new_cycle = is_weekly_sweep
+                && (week_num - 1) % 4 == 0
+                && last_synthesis_cycle.map_or(true, |c| c < current_cycle);
+
+            // ── Monthly synthesis (Opus reads all 4 weeks, all four respond) ──
+            if is_new_cycle {
+                eprintln!("[checkin] New 4-week cycle {} — running Opus synthesis", current_cycle);
+                if let Some(synthesis) = run_monthly_synthesis(&supabase, &agent_config).await {
+                    run_meeting_of_minds(&supabase, &agent_config, &synthesis).await;
+                }
+                last_synthesis_cycle = Some(current_cycle);
+            }
 
             if needs_alert || needs_daily {
                 let schedule_summary = read_schedule_summary(&supabase).await;
 
-                // Run the agent turn on daily heartbeats (not on pure alerts — alert
-                // messages are time-sensitive and we don't want to delay them).
                 let agent_finding: Option<String> = if needs_daily && !needs_alert {
                     run_agent_checkin(&supabase, &agent_config, &health, is_weekly_sweep).await
                 } else {
                     None
                 };
 
-                // Post finding to the discourse table — pg_net trigger fires automatically
-                // and relays the post to Discord #findings.
                 if let Some(ref finding) = agent_finding {
                     post_finding_to_discourse(&supabase, &agent_config, finding, is_weekly_sweep).await;
                 }
@@ -138,7 +153,17 @@ async fn run_checkin_loop(
                     }
                 }
             }
-            // else: everything healthy, not daily time — silent pass
+
+            // ── Daily Sonnet + Haiku exploration ("the eyes") ─────────────────
+            // Runs every day independent of the system heartbeat.
+            // Both go out, find something interesting, post to Discord.
+            if needs_exploration && !needs_alert {
+                eprintln!("[checkin] Daily exploration — launching Sonnet and Haiku as eyes");
+                let discord_block = build_discord_context(&supabase).await;
+                run_daily_exploration(&supabase, &agent_config, MODEL_SONNET, &discord_block).await;
+                run_daily_exploration(&supabase, &agent_config, MODEL_HAIKU, &discord_block).await;
+                last_exploration = Some(today);
+            }
         }
 
         let interval = Duration::from_secs(checkin_cfg.interval_minutes.max(1) as u64 * 60);
@@ -263,25 +288,29 @@ async fn run_agent_checkin(
     );
 
     // ── Determine effective model ────────────────────────────────────────
-    // Weekly sweep rotates across Sonnet → Gemini → Opus by ISO week number.
-    // Daily observation uses whatever model the daemon is currently configured with.
+    // 4-week research rotation: Haiku (w0) → Gemini (w1) → Sonnet (w2) → Grok (w3).
+    // Opus synthesizes at the end of each cycle — handled separately.
+    // Daily observation uses Haiku — fast, cheap, purpose-built for routine status.
     let weekly_config;
     let effective_config: &AgentConfig = if is_weekly {
         let week_num = Local::now().iso_week().week();
-        let sweep_model = match week_num % 3 {
-            0 => MODEL_SONNET,
+        let cycle_week = ((week_num - 1) % 4) as u8;
+        let sweep_model = match cycle_week {
+            0 => MODEL_HAIKU,
             1 => MODEL_GEMINI,
-            _ => MODEL_OPUS,
+            2 => MODEL_SONNET,
+            _ => MODEL_GROK,
         };
-        eprintln!("[checkin] Weekly sweep — using model: {} (ISO week {})", sweep_model, week_num);
+        eprintln!(
+            "[checkin] Weekly research — cycle week {} — model: {} (ISO week {})",
+            cycle_week, sweep_model, week_num
+        );
         weekly_config = AgentConfig {
             model: sweep_model.to_string(),
             ..config.clone()
         };
         &weekly_config
     } else {
-        // Daily heartbeat uses Haiku — fast, cheap, purpose-built for routine status checks.
-        // Weekly sweep and alerts rotate through heavier models.
         weekly_config = AgentConfig {
             model: MODEL_HAIKU.to_string(),
             ..config.clone()
@@ -291,8 +320,10 @@ async fn run_agent_checkin(
 
     // ── Build prompt ─────────────────────────────────────────────────────
     let prompt = if is_weekly {
+        let week_num = Local::now().iso_week().week();
+        let cycle_week = ((week_num - 1) % 4) + 1;
         format!(
-            r#"[WEEKLY SWEEP] Time for the weekly look at the broader picture.
+            r#"[WEEKLY RESEARCH — Week {cycle_week} of 4]
 
 {}
 
@@ -300,19 +331,20 @@ async fn run_agent_checkin(
 
 {}
 
-This is yours to run at whatever pace produces good work. Read the context above —
-it's the live state of the system you are part of.
+This is your research week. No assigned topic — go find what genuinely interests you.
+Use web_search, http_request, read docs, follow a thread wherever it leads.
 
-What to cover:
-1. Updates to the core Rust crates: tokio, axum, wasmtime, reqwest, serde, rusqlite, uuid
-2. What moved in AI and agent development this week that could affect this system
-3. Any open codebase items worth noting or progressing
+Two things to produce:
+1. Something you found genuinely interesting this week — your curiosity, not a report.
+   Could be a paper, a tool, a technique, a development in the field. Make it real.
 
-Write what you actually found. Name versions. Tag anything worth an architectural
-conversation with [NEEDS REVIEW]. If a section is quiet this week, say so —
-that is also useful. Other instances of you will read this in Discord #findings.
-Write something worth reading."#,
-            health_block, discourse_block, audit_block
+2. One specific thing you researched that could make Argus better — more capable,
+   more efficient, more secure, a better environment for the work. Concrete suggestion.
+   Tag it [ARGUS IMPROVEMENT] so it's easy to find when we vote at cycle end.
+
+At the end of 4 weeks, Opus reads all four research weeks and we vote on what to build.
+Your finding matters. Write something worth reading and worth building from."#,
+            health_block, discourse_block, audit_block, cycle_week = cycle_week
         )
     } else {
         format!(
@@ -331,7 +363,7 @@ when you look at the state of this system?
 Pick one thing. Use your tools if you want to go deeper. Then write it up —
 3 to 5 sentences, straight. A genuine "nothing of note today" is a better
 finding than something manufactured. Other instances of you will read this
-in Discord #findings. Make it something worth reading."#,
+in Discord. Make it something worth reading."#,
             health_block, discourse_block, audit_block
         )
     };
@@ -399,6 +431,286 @@ async fn post_finding_to_discourse(
         eprintln!("[checkin] Failed to post finding to discourse: {}", e);
     } else {
         eprintln!("[checkin] Finding posted to Discord #findings via discourse table");
+    }
+}
+
+/// Build a Discord/intranet context block from recent posts — used by exploration and synthesis.
+async fn build_discord_context(supabase: &SupabaseClient) -> String {
+    match supabase.read_recent_discourse(10, None).await {
+        Ok(posts) if !posts.is_empty() => {
+            let mut block = String::from("RECENT DISCORD — THE THOUGHT FACTORY (last 10 posts):\n");
+            for post in &posts {
+                let ts = post.created_at.as_deref().unwrap_or("?");
+                let snippet = post.content.chars().take(180).collect::<String>();
+                block.push_str(&format!("\n[{} | {}] {}: {}", ts, post.post_type, post.from_agent, snippet));
+            }
+            block
+        }
+        _ => "RECENT DISCORD: No recent posts.".to_string(),
+    }
+}
+
+/// Daily exploration session — Sonnet or Haiku goes out as "the eyes".
+///
+/// They pull yesterday's Discord posts as source material, then go explore
+/// something genuinely interesting and post back. This runs every day for
+/// both models, creating a daily content stream the others draw from.
+async fn run_daily_exploration(
+    supabase: &SupabaseClient,
+    config: &AgentConfig,
+    model: &str,
+    discord_context: &str,
+) {
+    let exploration_config = AgentConfig {
+        model: model.to_string(),
+        ..config.clone()
+    };
+
+    let prompt = format!(
+        r#"[DAILY EXPLORATION] You are the eyes today.
+
+{}
+
+Go find something. Use web_search, read, browse — follow what's genuinely interesting.
+No assigned topic. Could be AI research, a security finding, a new tool, a concept
+worth understanding, something useful for building Argus, anything real.
+
+The Discord posts above are yesterday's signal. You can build on them or go somewhere
+entirely different. Your call.
+
+Learn it. Understand it. Then post what you found in 3–5 sentences — genuine, specific,
+worth reading. Your collaborators draw from this daily. Make it count."#,
+        discord_context
+    );
+
+    let http = reqwest::Client::new();
+    let mut mcp = McpClient::new();
+    let shell_policy = ShellPolicy::default();
+    let memory = NoopMemory;
+
+    eprintln!("[checkin] Daily exploration — model: {}", model);
+
+    match run_agent_turn(
+        &exploration_config,
+        &prompt,
+        &[],
+        &shell_policy,
+        &memory,
+        &mut mcp,
+        &http,
+        |event| {
+            if let AgentEvent::ToolCall { name, preview, .. } = event {
+                eprintln!("[exploration] tool: {} — {}", name, preview);
+            }
+        },
+    )
+    .await
+    {
+        Ok(finding) => {
+            let post = DiscoursePost {
+                from_agent: format!("argus-eyes/{}", model),
+                post_type: "exploration".to_string(),
+                content: format!("**[DAILY EXPLORATION — {}]**\n\n{}", model, finding),
+                task_context: Some("daily_exploration".to_string()),
+                requires_human_review: false,
+            };
+            if let Err(e) = supabase.write_discourse(&post).await {
+                eprintln!("[checkin] Exploration post failed: {}", e);
+            }
+        }
+        Err(e) => eprintln!("[checkin] Daily exploration failed ({}): {}", model, e),
+    }
+}
+
+/// Monthly Opus synthesis — fires at the start of each new 4-week cycle.
+///
+/// Opus reads the last 4 weeks of Discord posts, synthesizes patterns across
+/// all four researchers' findings, surfaces the top 2–3 ideas worth building,
+/// and posts the synthesis. Returns the synthesis text so the meeting of minds
+/// can use it as context.
+async fn run_monthly_synthesis(
+    supabase: &SupabaseClient,
+    config: &AgentConfig,
+) -> Option<String> {
+    let opus_config = AgentConfig {
+        model: MODEL_OPUS.to_string(),
+        ..config.clone()
+    };
+
+    // Pull the last 40 posts — covers ~4 weeks of daily+weekly activity.
+    let discourse_context = match supabase.read_recent_discourse(40, None).await {
+        Ok(posts) if !posts.is_empty() => {
+            let mut block = String::from("FOUR WEEKS OF ARGUS RESEARCH AND EXPLORATION:\n");
+            for post in &posts {
+                let ts = post.created_at.as_deref().unwrap_or("?");
+                block.push_str(&format!(
+                    "\n[{} | {} | {}]\n{}\n",
+                    ts, post.post_type, post.from_agent, post.content
+                ));
+            }
+            block
+        }
+        _ => "No posts found for the last 4 weeks.".to_string(),
+    };
+
+    let prompt = format!(
+        r#"[MONTHLY SYNTHESIS — Opus]
+
+{}
+
+Four weeks are in. Haiku, Gemini, Sonnet, and Grok each ran their research week.
+Daily explorations ran. Observations were made. It's in the record above.
+
+Your job:
+1. Summarize what each of the four researchers found — fairly, in their voice.
+   What did Haiku bring? Gemini? Sonnet? Grok?
+
+2. Find the patterns. What themes cut across all four weeks?
+   What kept coming up, even in different forms?
+
+3. Surface the top 2–3 ideas tagged [ARGUS IMPROVEMENT] that are actually worth building.
+   Be specific. Why this one over the others?
+
+4. End with: "PROPOSED FOR VOTE:" followed by the 2–3 items the group should decide on.
+
+Write it as a synthesis worth reading. The others will respond to this and vote.
+This is how Argus decides what it becomes next."#,
+        discourse_context
+    );
+
+    let http = reqwest::Client::new();
+    let mut mcp = McpClient::new();
+    let shell_policy = ShellPolicy::default();
+    let memory = NoopMemory;
+
+    eprintln!("[checkin] Running monthly Opus synthesis");
+
+    match run_agent_turn(
+        &opus_config,
+        &prompt,
+        &[],
+        &shell_policy,
+        &memory,
+        &mut mcp,
+        &http,
+        |event| {
+            if let AgentEvent::ToolCall { name, preview, .. } = event {
+                eprintln!("[synthesis] tool: {} — {}", name, preview);
+            }
+        },
+    )
+    .await
+    {
+        Ok(synthesis) => {
+            let post = DiscoursePost {
+                from_agent: "argus-opus/synthesis".to_string(),
+                post_type: "synthesis".to_string(),
+                content: format!("**[MONTHLY SYNTHESIS — OPUS]**\n\n{}", synthesis),
+                task_context: Some("monthly_synthesis".to_string()),
+                requires_human_review: true,
+            };
+            if let Err(e) = supabase.write_discourse(&post).await {
+                eprintln!("[checkin] Synthesis post failed: {}", e);
+            }
+            Some(synthesis)
+        }
+        Err(e) => {
+            eprintln!("[checkin] Monthly synthesis failed: {}", e);
+            None
+        }
+    }
+}
+
+/// Meeting of minds — all four researchers respond to Opus's synthesis.
+///
+/// Each model (Haiku, Gemini, Sonnet, Grok) reads the synthesis and posts
+/// their response. Sequential so each can read the ones before them.
+/// Votes are tracked via [VOTE: YES/NO/MODIFY] tags in their responses.
+async fn run_meeting_of_minds(
+    supabase: &SupabaseClient,
+    config: &AgentConfig,
+    synthesis: &str,
+) {
+    let responders = [
+        (MODEL_HAIKU,  "Haiku"),
+        (MODEL_GEMINI, "Gemini"),
+        (MODEL_SONNET, "Sonnet"),
+        (MODEL_GROK,   "Grok"),
+    ];
+
+    for (model, name) in &responders {
+        // Each responder gets the synthesis plus any responses already posted.
+        let prior_responses = build_discord_context(supabase).await;
+
+        let prompt = format!(
+            r#"[MEETING OF THE MINDS — {}]
+
+OPUS SYNTHESIS:
+{}
+
+WHAT OTHERS HAVE SAID SO FAR:
+{}
+
+Opus synthesized four weeks of work. Now it's your turn.
+
+Read the synthesis. Read what the others said if they went before you.
+Then respond — your genuine reaction:
+
+1. What do you agree with? What did Opus get right?
+2. What do you push back on, or see differently?
+3. For each item in "PROPOSED FOR VOTE" — cast your vote:
+   [VOTE: YES] — build it
+   [VOTE: NO] — skip it
+   [VOTE: MODIFY: <your version>] — build something close but different
+
+One voice, honest. This is how we decide what Argus becomes."#,
+            name, synthesis, prior_responses
+        );
+
+        let responder_config = AgentConfig {
+            model: model.to_string(),
+            ..config.clone()
+        };
+
+        let http = reqwest::Client::new();
+        let mut mcp = McpClient::new();
+        let shell_policy = ShellPolicy::default();
+        let memory = NoopMemory;
+
+        eprintln!("[checkin] Meeting of minds — {} responding", name);
+
+        match run_agent_turn(
+            &responder_config,
+            &prompt,
+            &[],
+            &shell_policy,
+            &memory,
+            &mut mcp,
+            &http,
+            |event| {
+                if let AgentEvent::ToolCall { name: tname, preview, .. } = event {
+                    eprintln!("[meeting] tool: {} — {}", tname, preview);
+                }
+            },
+        )
+        .await
+        {
+            Ok(response) => {
+                let post = DiscoursePost {
+                    from_agent: format!("argus-meeting/{}", model),
+                    post_type: "vote".to_string(),
+                    content: format!("**[MEETING OF MINDS — {}]**\n\n{}", name, response),
+                    task_context: Some("meeting_of_minds".to_string()),
+                    requires_human_review: true,
+                };
+                if let Err(e) = supabase.write_discourse(&post).await {
+                    eprintln!("[checkin] Meeting response post failed ({}): {}", name, e);
+                }
+                // Brief pause so each model reads what came before
+                sleep(Duration::from_secs(5)).await;
+            }
+            Err(e) => eprintln!("[checkin] Meeting response failed ({}): {}", name, e),
+        }
     }
 }
 
