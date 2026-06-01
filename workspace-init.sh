@@ -97,19 +97,21 @@ fi
 if [ ! -d "$WORKSPACE/argus1/.git" ]; then
     echo "[workspace-init] Cloning Argus1 fork..."
     if [ -n "$GITHUB_TOKEN" ]; then
-        git clone "https://${GITHUB_TOKEN}@github.com/HeyBatlle1/Argus1.git" "$WORKSPACE/argus1" 2>/dev/null \
-            && echo "[workspace-init] Argus1 fork cloned (authenticated)" \
+        git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/HeyBatlle1/Argus1.git" "$WORKSPACE/argus1" 2>/dev/null \
+            && echo "[workspace-init] Argus1 fork cloned" \
             || echo "[workspace-init] Argus1 clone failed — continuing without source access"
     else
         git clone "https://github.com/HeyBatlle1/Argus1.git" "$WORKSPACE/argus1" 2>/dev/null \
-            && echo "[workspace-init] Argus1 fork cloned" \
+            && echo "[workspace-init] Argus1 fork cloned (no token — may fail for private repo)" \
             || echo "[workspace-init] Argus1 clone failed — continuing without source access"
     fi
 
     if [ -d "$WORKSPACE/argus1/.git" ]; then
+        # Strip token from stored remote URL — use public HTTPS for fetch
+        git -C "$WORKSPACE/argus1" remote set-url origin https://github.com/HeyBatlle1/Argus1.git
         # Disable push — this is a local working fork, not a deploy channel
         git -C "$WORKSPACE/argus1" remote set-url --push origin no_push
-        # Create a workspace branch for agent changes
+        # Create workspace branch for agent changes
         git -C "$WORKSPACE/argus1" checkout -b workspace 2>/dev/null || true
         git -C "$WORKSPACE/argus1" config user.name "Argus-Workspace"
         git -C "$WORKSPACE/argus1" config user.email "workspace@argus.local"
