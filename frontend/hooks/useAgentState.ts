@@ -171,11 +171,14 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   _handleServerMessage: (msg: ServerMessage) => {
     switch (msg.type) {
       case 'connected':
-        set({
+        set((prev) => ({
           connected: true,
           vaultKeys: msg.vault_keys ?? [],
           mcpServers: msg.mcp_servers ?? [],
-        });
+          // Sync to whatever model the daemon actually started with
+          activeModel: (msg.model as ModelId) ?? prev.activeModel,
+          accessTier: msg.model ? getModelTier(msg.model as ModelId) : prev.accessTier,
+        }));
         break;
 
       case 'thinking':

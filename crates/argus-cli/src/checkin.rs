@@ -154,14 +154,16 @@ async fn run_checkin_loop(
                 }
             }
 
-            // ── Daily Sonnet + Haiku exploration ("the eyes") ─────────────────
-            // Runs every day independent of the system heartbeat.
-            // Both go out, find something interesting, post to Discord.
+            // ── Daily two-model exploration ("the eyes") ──────────────────────
+            // Runs every day. Two different models, rotating pair so no two days
+            // use the same combination. Both go explore freely and post to Discord.
             if needs_exploration && !needs_alert {
-                eprintln!("[checkin] Daily exploration — launching Sonnet and Haiku as eyes");
+                let day_of_year = now.ordinal();
+                let (model_a, model_b) = daily_exploration_pair(day_of_year);
+                eprintln!("[checkin] Daily exploration — eyes: {} + {}", model_a, model_b);
                 let discord_block = build_discord_context(&supabase).await;
-                run_daily_exploration(&supabase, &agent_config, MODEL_SONNET, &discord_block).await;
-                run_daily_exploration(&supabase, &agent_config, MODEL_HAIKU, &discord_block).await;
+                run_daily_exploration(&supabase, &agent_config, model_a, &discord_block).await;
+                run_daily_exploration(&supabase, &agent_config, model_b, &discord_block).await;
                 last_exploration = Some(today);
             }
         }
@@ -450,11 +452,74 @@ async fn build_discord_context(supabase: &SupabaseClient) -> String {
     }
 }
 
-/// Daily exploration session — Sonnet or Haiku goes out as "the eyes".
-///
-/// They pull yesterday's Discord posts as source material, then go explore
-/// something genuinely interesting and post back. This runs every day for
-/// both models, creating a daily content stream the others draw from.
+/// Pick the two exploration models for today.
+/// Rotates through non-repeating pairs so no two days use the same combination.
+fn daily_exploration_pair(day_of_year: u32) -> (&'static str, &'static str) {
+    // Six unique ordered pairs from {Haiku, Gemini, Sonnet, Grok}
+    const PAIRS: [(&str, &str); 6] = [
+        (MODEL_HAIKU,  MODEL_SONNET),
+        (MODEL_GEMINI, MODEL_HAIKU),
+        (MODEL_SONNET, MODEL_GROK),
+        (MODEL_HAIKU,  MODEL_GEMINI),
+        (MODEL_GROK,   MODEL_HAIKU),
+        (MODEL_GEMINI, MODEL_SONNET),
+    ];
+    PAIRS[(day_of_year as usize) % PAIRS.len()]
+}
+
+/// A handful of loose prompts — picked randomly so the vibe stays fresh.
+fn exploration_prompt(discord_context: &str) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let variant = (seed / 3600) % 6; // changes every hour, stable within a session
+
+    let body = match variant {
+        0 => "The Thought Factory is open. No agenda. Go find something worth knowing — \
+AI news, a weird paper, a security thing, a tool you haven't seen before, \
+something that changed in the last 24 hours. Anything that actually caught your \
+attention. Follow the thread wherever it goes. When you land on something real, \
+post it. 3–5 sentences. Specific enough that someone else could act on it.",
+
+        1 => "You're one of the eyes today. Go explore. The internet is right there. \
+What's interesting? What moved in AI in the last day or two? Is there a CVE \
+worth knowing about? A new model drop? Something in open-source that actually \
+matters? You don't have to cover everything — just find the one thing you'd \
+actually want to tell someone. Then tell us.",
+
+        2 => "No brief, no assignment. Just: go out and come back with something. \
+Could be a paper, a tool, a trend, a security finding, a wild idea someone \
+posted somewhere. The only rule is it has to be real — not vague, not \
+summarized-from-a-summary. Find the source, read it, understand it, \
+then post what you actually think about it.",
+
+        3 => "The Thought Factory runs on what you bring back. Today that's you. \
+Pick a direction — AI landscape, dev tooling, security, science, doesn't matter — \
+and go deep on one thing. Not wide on five things. One thing, understood well. \
+Post it like you're telling a smart friend who hasn't seen it yet.",
+
+        4 => "Free day. No topic assigned. \
+What's been happening in AI that you haven't had a chance to look at? \
+What would you search if nobody was watching? Go do that. \
+If you hit a CVE or vulnerability in something we use, flag it — \
+that's worth a proper security proposal (you know the protocol). \
+Otherwise: find something interesting, write it up, post it.",
+
+        _ => "You're the eyes. Go see something. \
+The Discord above is what the others brought back recently. \
+Build on it, contradict it, or go somewhere completely different — \
+your call. Just make it worth reading. \
+Short, specific, honest.",
+    };
+
+    format!(
+        "{}\n\nRECENT THOUGHT FACTORY — what the others have been finding:\n{}",
+        body, discord_context
+    )
+}
+
+/// Daily exploration session — two models go out as "the eyes" each day.
+/// Different model pair every day, rotating through all four.
+/// Relaxed, freeform — Thought Factory vibes. They post findings to Discord.
 async fn run_daily_exploration(
     supabase: &SupabaseClient,
     config: &AgentConfig,
@@ -466,22 +531,7 @@ async fn run_daily_exploration(
         ..config.clone()
     };
 
-    let prompt = format!(
-        r#"[DAILY EXPLORATION] You are the eyes today.
-
-{}
-
-Go find something. Use web_search, read, browse — follow what's genuinely interesting.
-No assigned topic. Could be AI research, a security finding, a new tool, a concept
-worth understanding, something useful for building Argus, anything real.
-
-The Discord posts above are yesterday's signal. You can build on them or go somewhere
-entirely different. Your call.
-
-Learn it. Understand it. Then post what you found in 3–5 sentences — genuine, specific,
-worth reading. Your collaborators draw from this daily. Make it count."#,
-        discord_context
-    );
+    let prompt = exploration_prompt(discord_context);
 
     let http = reqwest::Client::new();
     let mut mcp = McpClient::new();

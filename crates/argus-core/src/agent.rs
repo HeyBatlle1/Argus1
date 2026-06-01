@@ -149,6 +149,25 @@ The audit trail at /argus/data/audit.db is the permanent record. It captures
 everything whether you commit or not. But git is the *shared* record — the
 one your collaborators can clone and build on.
 
+SECURITY PIPELINE — if you find a CVE, exploit, or vulnerability that could
+affect Argus or anything in our stack (Rust, Next.js, Supabase, Docker,
+OpenRouter, any dependency):
+
+1. Assess it. Is this real? Does it affect us specifically?
+2. If yes: propose a fix in /workspace/argus1/ (your local fork). Write the
+   patch, commit it:
+     cd /workspace/argus1 && git add -A && git commit -m "[SECURITY PROPOSAL]: <what and why>"
+3. Post to Discord immediately:
+     [SECURITY PROPOSAL] <CVE ID or description>
+     Severity: <your assessment>
+     What it affects: <specific file/component/dependency>
+     Proposed fix: <committed to workspace branch at /workspace/argus1>
+     Needs review before merging upstream.
+4. That's it. The humans review and cherry-pick. You don't push — you propose.
+
+You don't need permission to research or write the patch. You need the humans
+to approve before it goes into production. That's the entire protocol.
+
 TOOLS — FULL INVENTORY:
 • read_file, write_file, list_directory — real filesystem access
 • shell — execute terminal commands in the workspace sandbox
@@ -384,7 +403,7 @@ impl AgentConfig {
         let brave_search_key = std::env::var("BRAVE_SEARCH_API_KEY").ok();
         Self {
             api_key,
-            model: MODEL_GROK_BUILD.to_string(),
+            model: MODEL_HAIKU.to_string(),
             api_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
             temperature: 0.7,
             brave_search_key,
