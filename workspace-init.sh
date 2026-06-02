@@ -131,5 +131,47 @@ else
     fi
 fi
 
+# ── Security: CVE-2026-48710 pip install guard ────────────────────────────────
+# BadHost: host-header injection in Starlette < 1.0.1 bypasses path-based auth.
+# Affects fastapi, litellm, vllm, and any package that pulls the vulnerable ASGI stack.
+# Do NOT install these. If starlette is genuinely needed, it must be >= 1.0.1.
+if [ ! -f /usr/local/bin/pip3.real ]; then
+    cp /usr/bin/pip3 /usr/local/bin/pip3.real 2>/dev/null || true
+    cat > /usr/local/bin/pip3 << 'PIPGUARD'
+#!/usr/bin/env python3
+"""pip wrapper — blocks CVE-2026-48710 (BadHost) affected packages."""
+import sys, os, re
+
+BLOCKED = {
+    'fastapi':      'pulls starlette < 1.0.1',
+    'litellm':      'runs on affected starlette stack',
+    'vllm':         'runs on affected starlette stack',
+    'openai-proxy': 'runs on affected starlette stack',
+}
+
+args = sys.argv[1:]
+if args and args[0] == 'install':
+    for pkg in args[1:]:
+        if pkg.startswith('-'):
+            continue
+        name = re.split(r'[>=<!@\[ ]', pkg.lower())[0].strip()
+        if name in BLOCKED:
+            print(f"\n[ARGUS SECURITY] BLOCKED: '{name}'\n"
+                  f"  Reason: {BLOCKED[name]}\n"
+                  f"  CVE-2026-48710 (BadHost) — Starlette host-header injection, CVSS 7.0\n"
+                  f"  This package is not permitted in the Argus workspace.\n", file=sys.stderr)
+            sys.exit(1)
+        if name == 'starlette' and '>=' not in pkg and '==' not in pkg:
+            idx = args.index(pkg)
+            args[idx] = 'starlette>=1.0.1'
+            print(f"[ARGUS SECURITY] starlette auto-pinned to >=1.0.1 (CVE-2026-48710)", file=sys.stderr)
+
+os.execv('/usr/local/bin/pip3.real', ['/usr/local/bin/pip3.real'] + args)
+PIPGUARD
+    chmod +x /usr/local/bin/pip3
+    ln -sf /usr/local/bin/pip3 /usr/local/bin/pip 2>/dev/null || true
+    echo "[workspace-init] CVE-2026-48710 pip guard installed"
+fi
+
 # ── Start exec server ──────────────────────────────────────────────────────────
 exec python3 /workspace_exec_server.py

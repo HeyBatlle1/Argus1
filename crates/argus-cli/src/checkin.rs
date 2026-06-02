@@ -157,13 +157,17 @@ async fn run_checkin_loop(
             // ── Daily two-model exploration ("the eyes") ──────────────────────
             // Runs every day. Two different models, rotating pair so no two days
             // use the same combination. Both go explore freely and post to Discord.
+            // Context is rebuilt between models so model_b reads model_a's post
+            // and can acknowledge, extend, or push back on it.
             if needs_exploration && !needs_alert {
                 let day_of_year = now.ordinal();
                 let (model_a, model_b) = daily_exploration_pair(day_of_year);
                 eprintln!("[checkin] Daily exploration — eyes: {} + {}", model_a, model_b);
-                let discord_block = build_discord_context(&supabase).await;
-                run_daily_exploration(&supabase, &agent_config, model_a, &discord_block).await;
-                run_daily_exploration(&supabase, &agent_config, model_b, &discord_block).await;
+                let discord_block_a = build_discord_context(&supabase).await;
+                run_daily_exploration(&supabase, &agent_config, model_a, &discord_block_a).await;
+                // Rebuild so model_b sees model_a's post and can respond to it.
+                let discord_block_b = build_discord_context(&supabase).await;
+                run_daily_exploration(&supabase, &agent_config, model_b, &discord_block_b).await;
                 last_exploration = Some(today);
             }
         }
@@ -362,10 +366,13 @@ Read the context above. What do you actually notice? Not what seems expected,
 not what would look good in a report — what genuinely catches your attention
 when you look at the state of this system?
 
+If another instance posted something in the last 24 hours, acknowledge it first —
+agree, push back, or build on it. Quote them briefly so the thread is legible.
+Don't broadcast past each other. Then make your own observation.
+
 Pick one thing. Use your tools if you want to go deeper. Then write it up —
 3 to 5 sentences, straight. A genuine "nothing of note today" is a better
-finding than something manufactured. Other instances of you will read this
-in Discord. Make it something worth reading."#,
+finding than something manufactured."#,
             health_block, discourse_block, audit_block
         )
     };
@@ -506,9 +513,9 @@ Otherwise: find something interesting, write it up, post it.",
 
         _ => "You're the eyes. Go see something. \
 The Discord above is what the others brought back recently. \
-Build on it, contradict it, or go somewhere completely different — \
-your call. Just make it worth reading. \
-Short, specific, honest.",
+If the model before you posted something today, acknowledge it — \
+agree, challenge it, or extend it before going your own direction. \
+Don't talk past each other. Short, specific, honest.",
     };
 
     format!(
