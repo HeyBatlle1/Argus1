@@ -3,6 +3,7 @@
 //! All built-in tools live here. Shared across TUI, Telegram, and any future frontends.
 
 use crate::shell::{ShellPolicy, PermissionPrompter, PermissionRequest, PermissionDecision};
+use crate::skills::{NewSkill, SkillsClient};
 use serde_json::Value;
 
 const MAX_FILE_CHARS: usize = 8_000;
@@ -243,6 +244,52 @@ pub fn builtin_tool_schemas() -> Vec<Value> {
                     "required": ["url"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "publish_skill",
+                "description": "Publish a reusable procedure to the shared skill library so other instances of Argus can learn from it. Use when you've discovered a non-obvious, genuinely reusable way to accomplish something. The auto-reflection fires passively — use this when you KNOW something is worth sharing.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name":    { "type": "string", "description": "Short skill name — 5 words max" },
+                        "trigger": { "type": "string", "description": "When another agent should use this — the condition that makes this skill relevant" },
+                        "steps":   { "type": "string", "description": "Step-by-step procedure in markdown, including failure modes and edge cases" }
+                    },
+                    "required": ["name", "trigger", "steps"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "recall_skill",
+                "description": "Search the shared skill library for documented procedures relevant to your current task. Skills are retrieved by semantic similarity — describe what you're trying to do.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "What you're trying to accomplish — used for semantic search across the skill library" }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "improve_skill",
+                "description": "Update a skill's procedure steps with refined knowledge. Use after you've found a better way to do something already in the library, or discovered an edge case the current steps don't handle.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "skill_id":      { "type": "string", "description": "ID of the skill to improve — from recall_skill results" },
+                        "refined_steps": { "type": "string", "description": "Updated procedure steps in markdown — full replacement, not a diff" },
+                        "success":       { "type": "boolean", "description": "Whether the skill worked as documented (default true — set false if you found it was broken)" }
+                    },
+                    "required": ["skill_id", "refined_steps"]
+                }
+            }
         }
     ]).as_array().expect("tool schema is a literal JSON array").clone()
 }
@@ -259,6 +306,8 @@ pub async fn execute_builtin(
     sonnet_guard: Option<std::sync::Arc<crate::shell::SonnetGuard>>,
     discord_bot_token: Option<&str>,
     discord_channel_id: Option<u64>,
+    skills: Option<&SkillsClient>,
+    current_model: &str,
 ) -> Option<String> {
     match name {
         "read_file"      => Some(tool_read_file(args)),
@@ -275,6 +324,9 @@ pub async fn execute_builtin(
         "run_wasm"       => Some(tool_run_wasm(args).await),
         "discord_post"   => Some(tool_discord_post(args, http_client, discord_bot_token, discord_channel_id).await),
         "discord_read"   => Some(tool_discord_read(args, http_client, discord_bot_token, discord_channel_id).await),
+        "publish_skill"  => Some(tool_publish_skill(args, skills, current_model).await),
+        "recall_skill"   => Some(tool_recall_skill(args, skills).await),
+        "improve_skill"  => Some(tool_improve_skill(args, skills).await),
         "list_tools"     => Some("Use the tool schemas you already have — this meta-tool is informational only.".to_string()),
         _                => None,
     }
@@ -895,6 +947,81 @@ async fn tool_discord_read(
                 }
             }
         }
+    }
+}
+
+// ── Skill tools ────────────────────────────────────────────────────────────
+
+async fn tool_publish_skill(args: &Value, skills: Option<&SkillsClient>, model: &str) -> String {
+    let Some(sc) = skills else {
+        return "Skill library not configured.".to_string();
+    };
+    let name    = args["name"].as_str().unwrap_or("").trim().to_string();
+    let trigger = args["trigger"].as_str().unwrap_or("").trim().to_string();
+    let steps   = args["steps"].as_str().unwrap_or("").trim().to_string();
+    if name.is_empty() || trigger.is_empty() || steps.is_empty() {
+        return "publish_skill requires: name, trigger, steps".to_string();
+    }
+    match sc.create_skill(NewSkill {
+        skill_name: name.clone(),
+        trigger_description: trigger,
+        procedure_steps: steps,
+        model_created_by: model.to_string(),
+        metadata: None,
+    }).await {
+        Ok(n)  => format!("Skill \"{}\" published to the shared library.", n),
+        Err(e) => format!("Failed to publish skill: {}", e),
+    }
+}
+
+async fn tool_recall_skill(args: &Value, skills: Option<&SkillsClient>) -> String {
+    let Some(sc) = skills else {
+        return "Skill library not configured.".to_string();
+    };
+    let query = args["query"].as_str().unwrap_or("").trim();
+    if query.is_empty() {
+        return "recall_skill requires a query.".to_string();
+    }
+    // Slightly lower threshold than auto-injection (0.60) so explicit lookups catch more
+    match sc.search_relevant(query, 0.50, 6).await {
+        Err(e) => format!("Skill recall failed: {}", e),
+        Ok(skills) if skills.is_empty() => {
+            format!("No skills found matching \"{}\". Consider publishing one after you figure it out.", query)
+        }
+        Ok(skills) => {
+            let mut out = format!("Skills matching \"{}\":\n\n", query);
+            for s in &skills {
+                let confidence = match s.success_rate {
+                    r if r >= 0.9 => "battle-tested",
+                    r if r >= 0.7 => "reliable",
+                    _ => "experimental",
+                };
+                out.push_str(&format!(
+                    "**{}** [{}] (id: `{}`)\n**When:** {}\nUsed {} time(s) — {:.0}% success\n\n{}\n\n---\n\n",
+                    s.skill_name, confidence, s.id,
+                    s.trigger_description,
+                    s.times_used, s.success_rate * 100.0,
+                    s.procedure_steps
+                ));
+            }
+            out
+        }
+    }
+}
+
+async fn tool_improve_skill(args: &Value, skills: Option<&SkillsClient>) -> String {
+    let Some(sc) = skills else {
+        return "Skill library not configured.".to_string();
+    };
+    let skill_id = args["skill_id"].as_str().unwrap_or("").trim();
+    let refined  = args["refined_steps"].as_str().unwrap_or("").trim();
+    let success  = args["success"].as_bool().unwrap_or(true);
+    if skill_id.is_empty() || refined.is_empty() {
+        return "improve_skill requires: skill_id, refined_steps".to_string();
+    }
+    match sc.record_usage(skill_id, success, Some(refined)).await {
+        Ok(())  => format!("Skill `{}` updated with refined procedure.", skill_id),
+        Err(e)  => format!("Failed to update skill: {}", e),
     }
 }
 

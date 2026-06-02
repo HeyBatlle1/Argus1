@@ -38,6 +38,7 @@ TOOLS:
 • web_search — current information from the web via Brave Search
 • http_request — call any API or web endpoint
 • remember, recall, forget — persistent memory across sessions
+• publish_skill, recall_skill, improve_skill — shared procedural skill library
 • list_tools — see every tool available in this session
 • Any MCP tools connected in this session
 
@@ -179,6 +180,9 @@ TOOLS — FULL INVENTORY:
 • discord_post — post a message directly to the shared Discord channel
 • discord_read — read recent messages from the shared Discord channel
 • remember, recall, forget — persistent memory across sessions
+• publish_skill — publish a reusable procedure to the shared skill library
+• recall_skill — search the skill library by topic (explicit lookup vs auto-injection)
+• improve_skill — refine an existing skill's procedure steps with new knowledge
 • list_tools — see every tool available in this session including MCP tools
 • Any MCP tools connected in this session
 
@@ -759,7 +763,7 @@ where
                 }
                 out
             } else if let Some(output) =
-                tools::execute_builtin(name, &args, shell_policy, memory, http_client, config.brave_search_key.as_deref(), config.shell_prompter.clone(), config.exec_auth_token.as_deref(), config.sonnet_guard.clone(), config.discord_bot_token.as_deref(), config.discord_channel_id).await
+                tools::execute_builtin(name, &args, shell_policy, memory, http_client, config.brave_search_key.as_deref(), config.shell_prompter.clone(), config.exec_auth_token.as_deref(), config.sonnet_guard.clone(), config.discord_bot_token.as_deref(), config.discord_channel_id, config.skills.as_ref(), &config.model).await
             {
                 output
             } else {
