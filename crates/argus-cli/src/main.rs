@@ -3,6 +3,7 @@
 mod checkin;
 mod discord;
 mod telegram;
+mod triage_loop;
 mod tui;
 mod web;
 
@@ -322,6 +323,9 @@ async fn main() -> anyhow::Result<()> {
             if discord_bot_token.is_some() && discord_channel_id.is_some() {
                 println!("[+] Discord direct access enabled — agents can read/post to channel");
             }
+            // Clone before move into config so triage_loop can use the values too.
+            let triage_discord_token   = discord_bot_token.clone();
+            let triage_discord_channel = discord_channel_id.map(|id| id.to_string());
             config.discord_bot_token = discord_bot_token;
             config.discord_channel_id = discord_channel_id;
 
@@ -493,6 +497,19 @@ async fn main() -> anyhow::Result<()> {
             ) {
                 checkin::spawn_checkin_loop(sb.clone(), token.to_string(), chat_id, config.clone());
                 println!("[+] Check-in loop started (full agent capabilities)");
+
+                // Spawn triage gate alongside checkin loop.
+                // Haiku polls the queue every 30s, classifies posts, routes to
+                // Discord, flags failures. No tools in triage context — by design.
+                if let (Some(ref dt), Some(ref dc)) = (&triage_discord_token, &triage_discord_channel) {
+                    triage_loop::spawn_triage_loop(
+                        sb.clone(),
+                        config.clone(),
+                        dt.clone(),
+                        dc.clone(),
+                    );
+                    println!("[+] Triage gate active — Haiku watching the queue");
+                }
             }
 
             // Start web server on port 9000 as a background task so the
