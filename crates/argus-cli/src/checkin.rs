@@ -34,7 +34,7 @@
 //!
 //! Alert messages suppress the finding — the alert takes priority.
 
-use argus_core::agent::{AgentConfig, AgentEvent, MODEL_GEMINI, MODEL_GROK, MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET};
+use argus_core::agent::{AgentConfig, AgentEvent, MODEL_GEMINI, MODEL_GROK, MODEL_GROK_BUILD, MODEL_GROK_MULTI, MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET};
 use argus_core::mcp::McpClient;
 use argus_core::shell::ShellPolicy;
 use argus_core::supabase::{CheckinLogEntry, DiscoursePost, SupabaseClient};
@@ -688,11 +688,18 @@ async fn run_meeting_of_minds(
     config: &AgentConfig,
     synthesis: &str,
 ) {
+    // Grok Build and Grok Multi are consultants, not daily contributors.
+    // They don't run in exploration or check-in loops — their value is depth
+    // at a specific moment, not breadth across every session. This is that moment.
+    // Grok Build brings technical feasibility to proposals. Grok Multi brings
+    // orchestration — how the decisions sequence across the team.
     let responders = [
-        (MODEL_HAIKU,  "Haiku"),
-        (MODEL_GEMINI, "Gemini"),
-        (MODEL_SONNET, "Sonnet"),
-        (MODEL_GROK,   "Grok"),
+        (MODEL_HAIKU,       "Haiku"),
+        (MODEL_GEMINI,      "Gemini"),
+        (MODEL_SONNET,      "Sonnet"),
+        (MODEL_GROK,        "Grok"),
+        (MODEL_GROK_BUILD,  "Grok Build"),
+        (MODEL_GROK_MULTI,  "Grok Multi"),
     ];
 
     for (model, name) in &responders {
