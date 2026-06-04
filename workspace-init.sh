@@ -119,15 +119,19 @@ if [ ! -d "$WORKSPACE/argus1/.git" ]; then
         echo "[workspace-init] Agents can commit freely. Changes reviewed before merging upstream."
     fi
 else
-    # Pull upstream changes onto main, don't touch the workspace branch
-    git -C "$WORKSPACE/argus1" fetch origin 2>/dev/null || true
+    # Merge upstream main into whatever branch the workspace is on.
+    # The workspace branch always stays current with production —
+    # agents see the real codebase, not a stale snapshot.
     CURRENT=$(git -C "$WORKSPACE/argus1" branch --show-current 2>/dev/null)
-    if [ "$CURRENT" = "main" ] || [ "$CURRENT" = "master" ]; then
-        git -C "$WORKSPACE/argus1" pull --ff-only 2>/dev/null \
-            && echo "[workspace-init] Argus1 fork updated from upstream" \
-            || echo "[workspace-init] Fork pull skipped"
+    if [ -n "$GITHUB_TOKEN" ]; then
+        git -C "$WORKSPACE/argus1" fetch \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/HeyBatlle1/Argus1.git" \
+            main 2>/dev/null \
+            && git -C "$WORKSPACE/argus1" merge FETCH_HEAD --no-edit 2>/dev/null \
+            && echo "[workspace-init] Argus1 fork synced from upstream main (branch: $CURRENT)" \
+            || echo "[workspace-init] Upstream sync skipped (merge conflict or fetch failed)"
     else
-        echo "[workspace-init] Fork on branch '$CURRENT' — skipping upstream pull"
+        echo "[workspace-init] No GITHUB_TOKEN — skipping upstream sync"
     fi
 fi
 
