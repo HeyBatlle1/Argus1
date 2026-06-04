@@ -270,7 +270,10 @@ async fn main() -> anyhow::Result<()> {
             // Spawn check-in loop + build EmbeddingClient if Supabase is configured
             let supabase_client: Option<argus_core::supabase::SupabaseClient>;
             let embedding_client = if let (Some(url), Some(key)) = (supabase_url, supabase_key) {
-                let supabase = argus_core::supabase::SupabaseClient::new(url, key);
+                let supabase = argus_core::supabase::SupabaseClient::new(url.clone(), key.clone());
+                // Thread Supabase creds into AgentConfig so tools can write to triage queue.
+                config.supabase_url = Some(url);
+                config.supabase_jwt = Some(key);
                 // Check-in loop is spawned later, after config is fully assembled
                 // (embedding, skills, shell_prompter, audit all wired in before spawn).
                 let ec = argus_core::EmbeddingClient::new(&config.api_key, supabase.clone());

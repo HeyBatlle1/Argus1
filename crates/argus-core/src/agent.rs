@@ -400,6 +400,10 @@ pub struct AgentConfig {
     pub discord_bot_token: Option<String>,
     /// Discord channel ID for direct read/write access.
     pub discord_channel_id: Option<u64>,
+    /// Supabase project URL — used by discord_post to route through the triage queue.
+    pub supabase_url: Option<String>,
+    /// Supabase service JWT — used by discord_post to write to triage_queue.
+    pub supabase_jwt: Option<String>,
 }
 
 impl AgentConfig {
@@ -420,6 +424,8 @@ impl AgentConfig {
             sonnet_guard: None,
             discord_bot_token: None,
             discord_channel_id: None,
+            supabase_url: None,
+            supabase_jwt: None,
         }
     }
 
@@ -763,7 +769,7 @@ where
                 }
                 out
             } else if let Some(output) =
-                tools::execute_builtin(name, &args, shell_policy, memory, http_client, config.brave_search_key.as_deref(), config.shell_prompter.clone(), config.exec_auth_token.as_deref(), config.sonnet_guard.clone(), config.discord_bot_token.as_deref(), config.discord_channel_id, config.skills.as_ref(), &config.model).await
+                tools::execute_builtin(name, &args, shell_policy, memory, http_client, config.brave_search_key.as_deref(), config.shell_prompter.clone(), config.exec_auth_token.as_deref(), config.sonnet_guard.clone(), config.discord_bot_token.as_deref(), config.discord_channel_id, config.skills.as_ref(), &config.model, config.supabase_url.as_deref(), config.supabase_jwt.as_deref()).await
             {
                 output
             } else {

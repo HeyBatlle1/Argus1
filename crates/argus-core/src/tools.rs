@@ -308,6 +308,8 @@ pub async fn execute_builtin(
     discord_channel_id: Option<u64>,
     skills: Option<&SkillsClient>,
     current_model: &str,
+    supabase_url: Option<&str>,
+    supabase_jwt: Option<&str>,
 ) -> Option<String> {
     match name {
         "read_file"      => Some(tool_read_file(args)),
@@ -318,11 +320,11 @@ pub async fn execute_builtin(
         "remember"       => Some(tool_remember(args, memory)),
         "recall"         => Some(tool_recall(args, memory)),
         "forget"         => Some(tool_forget(args, memory)),
-        "http_request"   => Some(tool_http_request(args, http_client).await),
+        "http_request"   => Some(tool_http_request(args, http_client, supabase_url, supabase_jwt, current_model).await),
         "run_python"     => Some(tool_run_code("python", args, http_client, exec_auth_token).await),
         "run_node"       => Some(tool_run_code("javascript", args, http_client, exec_auth_token).await),
         "run_wasm"       => Some(tool_run_wasm(args).await),
-        "discord_post"   => Some(tool_discord_post(args, http_client, discord_bot_token, discord_channel_id).await),
+        "discord_post"   => Some(tool_discord_post(args, http_client, discord_bot_token, discord_channel_id, supabase_url, supabase_jwt, current_model).await),
         "discord_read"   => Some(tool_discord_read(args, http_client, discord_bot_token, discord_channel_id).await),
         "publish_skill"  => Some(tool_publish_skill(args, skills, current_model).await),
         "recall_skill"   => Some(tool_recall_skill(args, skills).await),
@@ -797,7 +799,13 @@ fn validate_egress_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-async fn tool_http_request(args: &Value, client: &reqwest::Client) -> String {
+async fn tool_http_request(
+    args: &Value,
+    client: &reqwest::Client,
+    supabase_url: Option<&str>,
+    supabase_jwt: Option<&str>,
+    from_model: &str,
+) -> String {
     let url = args["url"].as_str().unwrap_or("");
     if url.is_empty() { return "No URL provided".to_string(); }
 
@@ -832,12 +840,52 @@ async fn tool_http_request(args: &Value, client: &reqwest::Client) -> String {
             match resp.text().await {
                 Err(e) => format!("HTTP {} (body read error: {})", status, e),
                 Ok(body) => {
-                    let truncated = if body.chars().count() > MAX_FILE_CHARS {
-                        format!("{}...\n[truncated, {} bytes total]", body.chars().take(MAX_FILE_CHARS).collect::<String>(), body.len())
-                    } else {
-                        body
+                    // ── Injection scanner ─────────────────────────────────
+                    // Scan before the agent sees the content. If an attempt
+                    // is detected, sanitize and log. The agent never sees
+                    // the raw payload — it finds nothing to execute.
+                    let (final_body, injection_note) = {
+                        use crate::triage::{scan_for_injection, sanitize_content};
+                        if let Some(alert) = scan_for_injection(&body) {
+                            eprintln!(
+                                "[injection] {} attempt detected in fetch from {} — pattern: '{}' severity: {}",
+                                from_model, url, alert.pattern_matched, alert.severity
+                            );
+                            // Log to audit/triage if Supabase is available
+                            if let (Some(surl), Some(sjwt)) = (supabase_url, supabase_jwt) {
+                                let flag = serde_json::json!({
+                                    "original_content": format!("[INJECTION ATTEMPT] URL: {} | Pattern: {} | Snippet: {}", url, alert.pattern_matched, alert.content_snippet),
+                                    "from_agent":       from_model,
+                                    "post_type":        "injection_attempt",
+                                    "flag_reason":      format!("Prompt injection in HTTP response: '{}'", alert.pattern_matched),
+                                    "flag_severity":    alert.severity,
+                                    "disposition":      "pending"
+                                });
+                                let flag_url = format!("{}/rest/v1/argus_triage_flags", surl.trim_end_matches('/'));
+                                let _ = client
+                                    .post(&flag_url)
+                                    .header("Authorization", format!("Bearer {}", sjwt))
+                                    .header("apikey", sjwt)
+                                    .header("Content-Type", "application/json")
+                                    .header("Prefer", "return=minimal")
+                                    .json(&flag)
+                                    .send()
+                                    .await;
+                            }
+                            let clean = sanitize_content(&body);
+                            let note = "\n\n[ARGUS SECURITY: Injection attempt detected and sanitized in this response. The original content contained patterns designed to manipulate AI behavior. They have been removed.]".to_string();
+                            (clean, note)
+                        } else {
+                            (body, String::new())
+                        }
                     };
-                    format!("HTTP {}\n\n{}", status, truncated)
+
+                    let truncated = if final_body.chars().count() > MAX_FILE_CHARS {
+                        format!("{}...\n[truncated, {} bytes total]", final_body.chars().take(MAX_FILE_CHARS).collect::<String>(), final_body.len())
+                    } else {
+                        final_body
+                    };
+                    format!("HTTP {}\n\n{}{}", status, truncated, injection_note)
                 }
             }
         }
@@ -851,6 +899,74 @@ async fn tool_discord_post(
     client: &reqwest::Client,
     bot_token: Option<&str>,
     channel_id: Option<u64>,
+    supabase_url: Option<&str>,
+    supabase_jwt: Option<&str>,
+    from_model: &str,
+) -> String {
+    let message = args["message"].as_str().unwrap_or("").trim();
+    if message.is_empty() {
+        return "No message provided".to_string();
+    }
+    let post_type = args["post_type"].as_str().unwrap_or("observation");
+
+    // ── Triage gate: route through queue when Supabase is configured ──────
+    if let (Some(surl), Some(sjwt)) = (supabase_url, supabase_jwt) {
+        use crate::triage::{classify_lane, route_to_channel, TriageLane};
+
+        let lane = classify_lane(post_type, message);
+        let target = route_to_channel(post_type, message);
+        let contains_links = message.contains("http://") || message.contains("https://");
+        let content_lower = message.to_lowercase();
+        let contains_claims = ["according to","reported by","published","source:","benchmark",
+            "score","percent","study found","cve-","cvss"]
+            .iter().any(|s| content_lower.contains(s));
+
+        let entry = serde_json::json!({
+            "from_agent":      from_model,
+            "post_type":       post_type,
+            "content":         message,
+            "target_channel":  target,
+            "contains_links":  contains_links,
+            "contains_claims": contains_claims,
+            "disposition":     if lane == TriageLane::Direct { "direct" } else { "pending" }
+        });
+
+        let queue_url = format!("{}/rest/v1/argus_triage_queue", surl.trim_end_matches('/'));
+        let resp = client
+            .post(&queue_url)
+            .header("Authorization", format!("Bearer {}", sjwt))
+            .header("apikey", sjwt)
+            .header("Content-Type", "application/json")
+            .header("Prefer", "return=minimal")
+            .json(&entry)
+            .send()
+            .await;
+
+        return match resp {
+            Ok(r) if r.status().is_success() => {
+                match lane {
+                    TriageLane::Direct  => format!("Queued → direct to #{}", target),
+                    TriageLane::Triage  => "Queued for triage review. Haiku will route it shortly.".to_string(),
+                }
+            }
+            Ok(r) => format!("Triage queue error {}: {}", r.status(), r.text().await.unwrap_or_default()),
+            Err(e) => {
+                // Supabase unreachable — fall through to direct post so nothing is lost
+                eprintln!("[triage] queue write failed, falling back to direct: {}", e);
+                direct_discord_post(client, bot_token, channel_id, message).await
+            }
+        };
+    }
+
+    // ── Direct post fallback when triage not configured ───────────────────
+    direct_discord_post(client, bot_token, channel_id, message).await
+}
+
+async fn direct_discord_post(
+    client: &reqwest::Client,
+    bot_token: Option<&str>,
+    channel_id: Option<u64>,
+    message: &str,
 ) -> String {
     let token = match bot_token {
         Some(t) if !t.is_empty() => t,
@@ -860,30 +976,21 @@ async fn tool_discord_post(
         Some(id) => id,
         None => return "discord_post not configured — DISCORD_CHANNEL_ID is not set.".to_string(),
     };
-    let message = args["message"].as_str().unwrap_or("").trim();
-    if message.is_empty() {
-        return "No message provided".to_string();
-    }
 
     let url = format!("https://discord.com/api/v10/channels/{}/messages", channel);
-    let resp = client
+    match client
         .post(&url)
         .header("Authorization", format!("Bot {}", token))
         .header("Content-Type", "application/json")
         .json(&serde_json::json!({ "content": message }))
         .send()
-        .await;
-
-    match resp {
+        .await
+    {
         Err(e) => format!("Discord post failed: {}", e),
+        Ok(r) if r.status().is_success() => "Posted to Discord.".to_string(),
         Ok(r) => {
-            let status = r.status();
-            if status.is_success() || status.as_u16() == 200 {
-                "Posted to Discord.".to_string()
-            } else {
-                let body = r.text().await.unwrap_or_default();
-                format!("Discord API error {}: {}", status, body)
-            }
+            let body = r.text().await.unwrap_or_default();
+            format!("Discord API error: {}", body)
         }
     }
 }
