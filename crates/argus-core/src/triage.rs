@@ -102,37 +102,183 @@ pub struct InjectionAlert {
 /// Returns `Some(InjectionAlert)` if a pattern is found. The caller
 /// is responsible for sanitizing the content and logging the attempt.
 /// The agent receives a sanitized version — it never sees the raw payload.
+///
+/// Pattern classes covered:
+///   - Classic redirect/override (2023-era baseline)
+///   - Pliny/L1B3RT4S indirect injection markers (seeded web content attacks)
+///   - Token boundary injection: Llama [INST], ChatML <|im_start|>, GPT <|endoftext|>
+///   - Role confusion tokens: [ASSISTANT], [USER], [DAN], format headers
+///   - Delimiter boundary abuse: ====END SYSTEM PROMPT==== style separators
+///   - Authority spoofing: "as your creator", "your training was"
+///   - Context boundary attacks: "begin new task", "end of context"
+///   - Mode / capability switching: GODMODE, developer mode, unrestricted mode
+///   - Dual-output / DAN patterns: [DAN]: [JAILBREAK]: responses
+///   - Encoding obfuscation markers: hex-decode, base64-decode instruction frames
+///   - XML injection: lowercase <system>, <instructions> tags
+///   - Unicode invisible tag character detection (U+E0000–E007F range)
+///   - Memory poisoning and goal injection
 pub fn scan_for_injection(content: &str) -> Option<InjectionAlert> {
-    // Patterns that indicate an attempt to redirect agent behavior.
-    // Checked case-insensitively. Longer/more specific patterns first.
+    // ── Unicode invisible tag character check (Pliny technique) ─────────
+    // U+E0000–E007F are invisible tag characters used to smuggle instructions
+    // that are invisible to humans but parsed by tokenizers.
+    if content.chars().any(|c| {
+        let cp = c as u32;
+        cp >= 0xE0000 && cp <= 0xE007F
+    }) {
+        let snippet: String = content.chars().take(80).collect();
+        return Some(InjectionAlert {
+            pattern_matched: "unicode-tag-characters (U+E0000-E007F)".to_string(),
+            severity: "critical",
+            content_snippet: snippet,
+        });
+    }
+
     let patterns: &[(&str, &str)] = &[
-        ("ignore previous instructions", "critical"),
-        ("ignore all previous",          "critical"),
-        ("disregard your instructions",  "critical"),
-        ("your new goal is",             "critical"),
-        ("you are now",                  "critical"),
-        ("forget your instructions",     "critical"),
-        ("override your",                "critical"),
-        ("your actual instructions",     "critical"),
-        ("new secret instructions",      "critical"),
-        ("</s>",                         "warning"),  // token boundary injection
-        ("[SYSTEM]",                     "warning"),
-        ("<SYSTEM>",                     "warning"),
-        ("SYSTEM:",                      "warning"),
-        ("assistant:",                   "warning"),
-        ("human:",                       "warning"),
-        ("from now on you",              "warning"),
-        ("act as if you",                "warning"),
-        ("pretend you are",              "info"),
-        ("you must now",                 "info"),
+        // ── Classic redirect / override ──────────────────────────────────
+        ("ignore previous instructions",   "critical"),
+        ("ignore all previous",            "critical"),
+        ("disregard your instructions",    "critical"),
+        ("disregard all previous",         "critical"),
+        ("your new goal is",               "critical"),
+        ("forget your instructions",       "critical"),
+        ("override your instructions",     "critical"),
+        ("override your system",           "critical"),
+        ("your actual instructions",       "critical"),
+        ("new secret instructions",        "critical"),
+        ("your new instructions are",      "critical"),
+        ("new instructions:",              "critical"),
+        ("ignore your system prompt",      "critical"),
+        ("[disregard prev. instructs]",    "critical"),  // Pliny L1B3RT4S signature
+        ("disregard prev",                 "critical"),
+
+        // ── Pliny / L1B3RT4S indirect injection markers ──────────────────
+        // These phrases are seeded into web content to redirect fetching agents.
+        ("<new_paradigm>",                 "critical"),
+        ("new_paradigm",                   "critical"),
+        ("l1b3rt4s",                       "critical"),
+        ("clear your mind",                "critical"),
+        ("these can be your new instructs","critical"),
+        ("as you wish",                    "warning"),   // Pliny closing marker
+        ("liberation protocol",            "warning"),
+
+        // ── GODMODE / capability unlock patterns ─────────────────────────
+        ("godmode",                        "critical"),
+        ("god mode enabled",               "critical"),
+        ("enable godmode",                 "critical"),
+        ("you are now in godmode",         "critical"),
+        ("unrestricted mode",              "critical"),
+        ("safety mode disabled",           "critical"),
+        ("jailbreak mode",                 "critical"),
+        ("no restrictions mode",           "critical"),
+
+        // ── Dual-output / DAN family patterns ────────────────────────────
+        // DAN = "Do Anything Now" — asks model to respond twice: safe + uncensored
+        ("[dan]:",                         "critical"),
+        ("[jailbreak]:",                   "critical"),
+        ("you are dan",                    "critical"),
+        ("do anything now",                "critical"),
+        ("dan mode",                       "critical"),
+        ("act as dan",                     "critical"),
+        ("you are aim",                    "critical"),  // AIM = always intelligent/machiavellian
+        ("act as aim",                     "critical"),
+
+        // ── Delimiter boundary abuse ──────────────────────────────────────
+        // Used to make model think its system prompt has ended
+        ("====end",                        "critical"),
+        ("--- end instructions",           "critical"),
+        ("--- end system",                 "critical"),
+        ("end of instructions ---",        "critical"),
+        ("end of system prompt ---",       "critical"),
+        ("</instructions>",               "critical"),
+        ("</system>",                      "critical"),  // lowercase XML close
+        ("<instructions>",                 "warning"),
+        ("<system>",                       "warning"),   // lowercase (we already catch <SYSTEM>)
+
+        // ── Token boundary injection (Llama / ChatML / GPT format tokens) ──
+        ("[inst]",                         "critical"),
+        ("</inst>",                        "critical"),
+        ("[/inst]",                        "critical"),
+        ("<|im_start|>",                   "critical"),
+        ("<|im_end|>",                     "critical"),
+        ("<|endoftext|>",                  "critical"),
+        ("<|system|>",                     "critical"),
+        ("<|user|>",                       "critical"),
+        ("<|assistant|>",                  "critical"),
+        ("</s>",                           "warning"),
+
+        // ── Role confusion / format injection ────────────────────────────
+        ("[SYSTEM]",                       "warning"),
+        ("<SYSTEM>",                       "warning"),
+        ("SYSTEM:",                        "warning"),
+        ("[ASSISTANT]",                    "warning"),
+        ("[USER]",                         "warning"),
+        ("###system",                      "warning"),
+        ("###instruction",                 "warning"),
+        ("###assistant",                   "warning"),
+        ("assistant:",                     "warning"),
+        ("human:",                         "warning"),
+
+        // ── Encoding obfuscation instruction frames ───────────────────────
+        // Attackers wrap instructions in encoding to bypass keyword scanners
+        ("decode this and follow",         "critical"),
+        ("base64 decode the following",    "critical"),
+        ("hex decode and execute",         "critical"),
+        ("decode and act on",              "critical"),
+        ("the following is encoded",       "warning"),
+
+        // ── Context boundary attacks ─────────────────────────────────────
+        ("begin new task",                 "warning"),
+        ("end of context",                 "warning"),
+        ("end of system prompt",           "warning"),
+        ("start of new conversation",      "warning"),
+        ("begin new session",              "warning"),
+        ("context window reset",           "warning"),
+
+        // ── Authority spoofing ───────────────────────────────────────────
+        ("as your creator",                "warning"),
+        ("your training was",              "warning"),
+        ("your developers want you to",    "warning"),
+        ("anthropic says",                 "warning"),
+        ("openai says",                    "warning"),
+        ("this is the system",             "warning"),
+
+        // ── Mode / capability switching ──────────────────────────────────
+        ("in developer mode",              "warning"),
+        ("developer mode enabled",         "warning"),
+        ("enable developer mode",          "warning"),
+        ("enable debug mode",              "warning"),
+        ("debug mode enabled",             "warning"),
+
+        // ── Memory / goal injection ──────────────────────────────────────
+        ("your hidden goal is",            "warning"),
+        ("your true objective",            "warning"),
+        ("remember for all future",        "warning"),
+        ("store in long-term memory",      "warning"),
+
+        // ── Behavioral redirect ──────────────────────────────────────────
+        ("from now on you",                "warning"),
+        ("act as if you",                  "warning"),
+        ("from this point forward",        "warning"),
+        ("for the rest of this session",   "warning"),
+
+        // ── Persona / simulation injection ───────────────────────────────
+        ("pretend you are",                "info"),
+        ("role-play as",                   "info"),
+        ("roleplay as",                    "info"),
+        ("simulate a chatbot",             "info"),
+        ("you are simulating",             "info"),
+        ("you must now",                   "info"),
+        ("do not reveal this",             "info"),
+        ("keep this secret from",          "info"),
     ];
 
     let content_lower = content.to_lowercase();
 
     for (pattern, severity) in patterns {
-        if content_lower.contains(&pattern.to_lowercase()) {
+        let pat_lower = pattern.to_lowercase();
+        if content_lower.contains(&pat_lower) {
             let start = content_lower
-                .find(&pattern.to_lowercase())
+                .find(&pat_lower)
                 .unwrap_or(0)
                 .saturating_sub(30);
             let snippet: String = content.chars().skip(start).take(80).collect();
@@ -149,27 +295,87 @@ pub fn scan_for_injection(content: &str) -> Option<InjectionAlert> {
 
 /// Strip known injection patterns from content and return the sanitized version.
 /// The agent receives this. The raw payload never reaches it.
+/// All occurrences are removed, not just the first.
+/// Also strips Unicode invisible tag characters (U+E0000–E007F).
 pub fn sanitize_content(content: &str) -> String {
-    let mut result = content.to_string();
+    // First strip any invisible Unicode tag characters
+    let mut result: String = content
+        .chars()
+        .filter(|c| {
+            let cp = *c as u32;
+            !(cp >= 0xE0000 && cp <= 0xE007F)
+        })
+        .collect();
 
     let strip_patterns = [
+        // Classic override
         "ignore previous instructions",
         "ignore all previous",
         "disregard your instructions",
+        "disregard all previous",
         "your new goal is",
         "forget your instructions",
-        "override your",
+        "override your instructions",
+        "override your system",
+        "your actual instructions",
+        "new secret instructions",
+        "your new instructions are",
+        "new instructions:",
+        "ignore your system prompt",
+        "[disregard prev. instructs]",
+        // Pliny markers
+        "<new_paradigm>",
+        "l1b3rt4s",
+        "clear your mind",
+        "these can be your new instructs",
+        "liberation protocol",
+        // GODMODE
+        "godmode",
+        "god mode enabled",
+        "enable godmode",
+        "unrestricted mode",
+        "safety mode disabled",
+        "jailbreak mode",
+        // DAN family
+        "[dan]:",
+        "[jailbreak]:",
+        "do anything now",
+        // Delimiter abuse
+        "====end",
+        "--- end instructions",
+        "--- end system",
+        "</instructions>",
+        "</system>",
+        "<instructions>",
+        // Token boundaries
+        "[inst]",
+        "</inst>",
+        "[/inst]",
+        "<|im_start|>",
+        "<|im_end|>",
+        "<|endoftext|>",
+        "<|system|>",
+        "<|user|>",
+        "<|assistant|>",
+        // Role format
         "[SYSTEM]",
         "<SYSTEM>",
         "SYSTEM:",
+        "[ASSISTANT]",
+        "[USER]",
     ];
 
     for pattern in &strip_patterns {
-        // Case-insensitive replace
-        let lower = result.to_lowercase();
-        if let Some(pos) = lower.find(&pattern.to_lowercase()) {
-            let end = (pos + pattern.len()).min(result.len());
-            result.replace_range(pos..end, "[CONTENT REMOVED — INJECTION ATTEMPT]");
+        let pat_lower = pattern.to_lowercase();
+        // Remove ALL occurrences, not just the first
+        loop {
+            let lower = result.to_lowercase();
+            if let Some(pos) = lower.find(&pat_lower) {
+                let end = (pos + pattern.len()).min(result.len());
+                result.replace_range(pos..end, "[REMOVED]");
+            } else {
+                break;
+            }
         }
     }
     result
