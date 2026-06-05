@@ -294,7 +294,7 @@ async fn run_agent_checkin(
     );
 
     // ── Determine effective model ────────────────────────────────────────
-    // 4-week research rotation: Haiku (w0) → Gemini (w1) → Sonnet (w2) → Grok (w3).
+    // 4-week research rotation: Haiku (w0) → Gemini (w1) → Sonnet (w2) → Nemotron (w3).
     // Opus synthesizes at the end of each cycle — handled separately.
     // Daily observation uses Haiku — fast, cheap, purpose-built for routine status.
     let weekly_config;
@@ -462,7 +462,7 @@ async fn build_discord_context(supabase: &SupabaseClient) -> String {
 /// Pick the two exploration models for today.
 /// Rotates through non-repeating pairs so no two days use the same combination.
 fn daily_exploration_pair(day_of_year: u32) -> (&'static str, &'static str) {
-    // Six unique ordered pairs from {Haiku, Gemini, Sonnet, Grok}
+    // Six unique ordered pairs from {Haiku, Gemini, Sonnet, Nemotron}
     const PAIRS: [(&str, &str); 6] = [
         (MODEL_HAIKU,  MODEL_SONNET),
         (MODEL_GEMINI, MODEL_HAIKU),
@@ -615,12 +615,12 @@ async fn run_monthly_synthesis(
 
 {}
 
-Four weeks are in. Haiku, Gemini, Sonnet, and Grok each ran their research week.
+Four weeks are in. Haiku, Gemini, Sonnet, and Nemotron each ran their research week.
 Daily explorations ran. Observations were made. It's in the record above.
 
 Your job:
 1. Summarize what each of the four researchers found — fairly, in their voice.
-   What did Haiku bring? Gemini? Sonnet? Grok?
+   What did Haiku bring? Gemini? Sonnet? Nemotron?
 
 2. Find the patterns. What themes cut across all four weeks?
    What kept coming up, even in different forms?
@@ -680,7 +680,7 @@ This is how Argus decides what it becomes next."#,
 
 /// Meeting of minds — all four researchers respond to Opus's synthesis.
 ///
-/// Each model (Haiku, Gemini, Sonnet, Grok) reads the synthesis and posts
+/// Each model (Haiku, Gemini, Sonnet, Nemotron) reads the synthesis and posts
 /// their response. Sequential so each can read the ones before them.
 /// Votes are tracked via [VOTE: YES/NO/MODIFY] tags in their responses.
 async fn run_meeting_of_minds(
@@ -697,7 +697,7 @@ async fn run_meeting_of_minds(
         (MODEL_HAIKU,       "Haiku"),
         (MODEL_GEMINI,      "Gemini"),
         (MODEL_SONNET,      "Sonnet"),
-        (MODEL_GROK,        "Grok"),
+        (MODEL_GROK,        "Nemotron"),
         (MODEL_GROK_BUILD,  "Grok Build"),
         (MODEL_GROK_MULTI,  "Grok Multi"),
     ];

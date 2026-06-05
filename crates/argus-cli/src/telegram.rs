@@ -63,7 +63,7 @@ impl ArgusBot {
             "/model" => {
                 if parts.len() == 1 {
                     Some(format!(
-                        "Current model: {} ({})\n\nAvailable:\n  haiku  — {}\n  sonnet — {}\n  opus   — {}\n  grok   — {}\n  gemini — {}\n\nSwitch with /model <name>",
+                        "Current model: {} ({})\n\nAvailable:\n  haiku    — {}\n  sonnet   — {}\n  opus     — {}\n  nemotron — {}\n  gemini   — {}\n\nSwitch with /model <name>",
                         model_label(&self.config.model), self.config.model,
                         MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS, MODEL_GROK, MODEL_GEMINI
                     ))

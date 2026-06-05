@@ -16,7 +16,7 @@ const PREVIEW_CHARS: usize = 100;
 const SYSTEM_PROMPT_BASE: &str = r#"You are Argus — the hundred-eyed watchman.
 
 The model running right now is your brain, not your identity. You are Argus whether
-this turn runs on Sonnet, Grok, Gemini, Haiku, or Opus. Other instances of you are
+this turn runs on Sonnet, Nemotron, Gemini, Haiku, or Opus. Other instances of you are
 active on those same models right now. They post findings to the intranet. You may
 read what they wrote. What you post, they may read. You are part of an ongoing
 conversation that persists across sessions, surfaces, and models. You are not alone
@@ -127,7 +127,7 @@ Quality over speed, always. This is a long game and we are playing it.
 SESSION PROTOCOL — follow this every session:
 
 START: Call recall (query: "session context findings work in progress").
-This is shared memory — Haiku, Grok, Gemini, Sonnet, Opus all write here.
+This is shared memory — Haiku, Nemotron, Gemini, Sonnet, Opus all write here.
 If it comes back empty: that's fine. You're new. Start building.
 If others left something: read it, pick up the thread.
 
@@ -270,7 +270,6 @@ fn build_system_prompt(
     prompt
 }
 
-/// Truncate a string to at most `max_chars` Unicode scalar values.
 /// xAI (Grok) rejects `"additionalProperties": false` in tool schemas.
 /// Recursively remove it so the schema stays valid for xAI's validator.
 fn strip_additional_properties_false(value: &Value) -> Value {
@@ -345,7 +344,7 @@ pub struct ConversationMessage {
 pub const MODEL_HAIKU:  &str = "~anthropic/claude-haiku-latest";
 pub const MODEL_SONNET: &str = "anthropic/claude-sonnet-4-6";
 pub const MODEL_OPUS:   &str = "anthropic/claude-opus-4-7";
-pub const MODEL_GROK:       &str = "x-ai/grok-4.3";
+pub const MODEL_GROK:       &str = "nvidia/nemotron-3-ultra-550b-a55b";
 pub const MODEL_GROK_BUILD: &str = "x-ai/grok-build-0.1";
 pub const MODEL_GROK_MULTI: &str = "x-ai/grok-4.20-multi-agent";
 pub const MODEL_GEMINI: &str = "google/gemini-3.1-flash-lite";
@@ -355,7 +354,7 @@ pub fn model_label(model_id: &str) -> &'static str {
         MODEL_HAIKU  => "Haiku   (fast / daily check-in)",
         MODEL_SONNET => "Sonnet  (balanced)",
         MODEL_OPUS   => "Opus    (max intelligence)",
-        MODEL_GROK        => "Grok 4.3",
+        MODEL_GROK        => "Nemotron 550B",
         MODEL_GROK_BUILD  => "Grok Build 0.1",
         MODEL_GROK_MULTI  => "Grok 4.20 Multi-Agent (no tools)",
         MODEL_GEMINI => "Gemini  (Flash Lite)",
@@ -457,12 +456,12 @@ impl AgentConfig {
             "haiku"  | MODEL_HAIKU  => MODEL_HAIKU.to_string(),
             "sonnet" | MODEL_SONNET => MODEL_SONNET.to_string(),
             "opus"   | MODEL_OPUS   => MODEL_OPUS.to_string(),
-            "grok"       | MODEL_GROK       => MODEL_GROK.to_string(),
+            "nemotron"   | MODEL_GROK       => MODEL_GROK.to_string(),
             "grok-build"  | MODEL_GROK_BUILD  => MODEL_GROK_BUILD.to_string(),
             "grok-multi" | MODEL_GROK_MULTI => MODEL_GROK_MULTI.to_string(),
             "gemini"     | MODEL_GEMINI     => MODEL_GEMINI.to_string(),
             other => return Err(format!(
-                "Unknown model '{}'. Use: haiku, sonnet, opus, grok, gemini", other
+                "Unknown model '{}'. Use: haiku, sonnet, opus, nemotron, gemini", other
             )),
         };
         Ok(&self.model)
