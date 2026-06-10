@@ -68,6 +68,19 @@ fi
 export ARGUS_TRIAGE_ACTIVE=$( [ -n "$SUPABASE_ARGUS_URL" ] && [ -n "$SUPABASE_ARGUS_SERVICE_KEY" ] && echo "1" || echo "0" )
 export ARGUS_DISCORD_ACTIVE=$( [ -n "$DISCORD_BOT_TOKEN" ] && echo "1" || echo "0" )
 
+# WS auth token — generated once, stored in vault, reused on every restart.
+# Stable across restarts so the baked-in frontend token stays valid.
+if [ -f "$BINARY" ]; then
+  ARGUS_WS_TOKEN=$("$BINARY" vault get argus_ws_token 2>/dev/null || echo "")
+  if [ -z "$ARGUS_WS_TOKEN" ]; then
+    ARGUS_WS_TOKEN=$(openssl rand -hex 32)
+    "$BINARY" vault set argus_ws_token "$ARGUS_WS_TOKEN" 2>/dev/null || true
+    echo "[+] Generated new ARGUS_WS_TOKEN and stored in vault"
+  fi
+  export ARGUS_WS_TOKEN
+  export NEXT_PUBLIC_WS_TOKEN="$ARGUS_WS_TOKEN"
+fi
+
 echo "[+] Secrets loaded — building and starting Argus stack..."
 docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d --build "$@"
 echo ""

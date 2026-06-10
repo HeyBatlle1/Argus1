@@ -3,18 +3,20 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
+        Query,
         State,
     },
-    http::Method,
-    response::IntoResponse,
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
+    response::{IntoResponse, Response},
     routing::get,
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 
 use argus_core::{AgentConfig, AgentEvent, ConversationMessage, EmbeddingClient, McpClient, MemoryBackend, ShellPolicy, MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS, MODEL_GROK, MODEL_GROK_BUILD, MODEL_GROK_MULTI};
 use argus_core::shell::PermissionPrompter;
@@ -242,8 +244,12 @@ struct AppState {
     brave_key: Option<String>,
     /// Vault key names (not values) — sent to the frontend on connect.
     vault_keys: Vec<String>,
+    /// Shared WS token — every upgrade request must present this as ?token=.
+    ws_token: String,
+    /// Origins allowed to open a WebSocket. Missing Origin (native clients) is
+    /// permitted when the token matches. Browser requests must be in this list.
+    allowed_origins: Vec<String>,
     // Daemon-level capabilities forwarded to every WebSocket connection.
-    // All are Arc-wrapped so cloning is cheap.
     shell_prompter:     Option<std::sync::Arc<dyn PermissionPrompter>>,
     exec_auth_token:    Option<String>,
     embedding:          Option<EmbeddingClient>,
@@ -259,10 +265,38 @@ pub async fn run_web_server(
     config: AgentConfig,
     vault_keys: Vec<String>,
 ) -> anyhow::Result<()> {
+    // Fail closed — refuse to run an unauthenticated control plane.
+    let ws_token = std::env::var("ARGUS_WS_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!(
+            "ARGUS_WS_TOKEN is not set — refusing to start unauthenticated web server.\n\
+             Run ./argus-up.sh to generate and inject the token automatically."
+        ))?;
+
+    // Base allowlist + optional operator extensions via env.
+    let mut allowed_origins = vec![
+        "http://localhost:3000".to_string(),
+        "http://127.0.0.1:3000".to_string(),
+    ];
+    if let Ok(extra) = std::env::var("ARGUS_WS_ALLOWED_ORIGINS") {
+        allowed_origins.extend(
+            extra.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+        );
+    }
+
+    let cors_origins: Vec<HeaderValue> = allowed_origins.iter()
+        .filter_map(|o| o.parse::<HeaderValue>().ok())
+        .collect();
+
     let state = Arc::new(AppState {
         api_key:            config.api_key,
         brave_key:          config.brave_search_key,
         vault_keys,
+        ws_token,
+        allowed_origins,
         shell_prompter:     config.shell_prompter,
         exec_auth_token:    config.exec_auth_token,
         embedding:          config.embedding,
@@ -272,9 +306,9 @@ pub async fn run_web_server(
     });
 
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(cors_origins)
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers(Any);
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     let app = Router::new()
         .route("/", get(health))
@@ -439,9 +473,26 @@ fn build_memory_update(memory: &SqliteMemory) -> ServerMessage {
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+) -> Response {
+    // Constant-time token check — prevents timing oracle attacks.
+    let provided = params.get("token").map(|s| s.as_bytes()).unwrap_or(b"");
+    if ring::constant_time::verify_slices_are_equal(provided, state.ws_token.as_bytes()).is_err() {
+        return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
+    }
+
+    // Origin check — browser requests must be from an allowed origin.
+    // Native clients (wscat, TUI, Telegram) send no Origin header and are allowed
+    // when the token matches.
+    if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
+        if !state.allowed_origins.iter().any(|o| o == origin) {
+            return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+        }
+    }
+
+    ws.on_upgrade(move |socket| handle_socket(socket, state)).into_response()
 }
 
 // ─── WebSocket connection handler ──────────────────────────────────────────

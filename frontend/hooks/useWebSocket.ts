@@ -38,7 +38,9 @@ export class RealConnection implements ArgusConnection {
   private _connect() {
     this.closing = false;
     try {
-      this.ws = new WebSocket(this.url);
+      const token = process.env.NEXT_PUBLIC_WS_TOKEN;
+      const url = token ? `${this.url}?token=${encodeURIComponent(token)}` : this.url;
+      this.ws = new WebSocket(url);
     } catch {
       this._scheduleReconnect();
       return;
