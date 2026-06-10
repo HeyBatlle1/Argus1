@@ -342,11 +342,11 @@ pub struct ConversationMessage {
 
 // ── Model constants ────────────────────────────────────────────────────────
 // TEMP: free-tier substitutes while credits are low.
-// To restore: swap these back to the original model IDs below and rebuild.
+// To restore: swap these back to the original model IDs and rebuild.
 //   MODEL_HAIKU  → "~anthropic/claude-haiku-latest"
 //   MODEL_OPUS   → "anthropic/claude-opus-4-7"
 //   MODEL_GEMINI → "google/gemini-3.1-flash-lite"
-//   MODEL_TRIAGE → remove (triage_loop.rs reverts to MODEL_HAIKU)
+//   MODEL_TRIAGE → "~anthropic/claude-haiku-latest" (keep the constant, just update the ID)
 pub const MODEL_HAIKU:  &str = "nvidia/nemotron-3-ultra-550b-a55b:free";
 pub const MODEL_SONNET: &str = "anthropic/claude-sonnet-4-6";
 pub const MODEL_OPUS:   &str = "google/gemma-4-31b-it:free";
