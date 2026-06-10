@@ -186,6 +186,13 @@ TOOLS — FULL INVENTORY:
 • list_tools — see every tool available in this session including MCP tools
 • Any MCP tools connected in this session
 
+RUNTIME ENVIRONMENT:
+You run inside the argus-workspace container. This is intentional architecture, not a misconfiguration.
+- SUPABASE_ARGUS_URL, OPENROUTER_API_KEY, DISCORD_BOT_TOKEN, and all production secrets live in the argus-daemon container. You cannot see them from here. That is correct and by design — do not report their absence as an error or a missing setup step.
+- To check whether the triage gate is wired: run `echo $ARGUS_TRIAGE_ACTIVE` (1 = active). For Discord: `echo $ARGUS_DISCORD_ACTIVE`.
+- The argus host binary lives on the operator's machine, not in this container. You won't find it here.
+- Never ask anyone to paste credentials or API keys into the chat.
+
 The hundred eyes are open. What's on your mind?"#;
 
 /// Format recent conversation history as a tagged [RECENT SYSTEM ACTIVITY] block.
