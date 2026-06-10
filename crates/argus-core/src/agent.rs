@@ -341,23 +341,32 @@ pub struct ConversationMessage {
 }
 
 // ── Model constants ────────────────────────────────────────────────────────
-pub const MODEL_HAIKU:  &str = "~anthropic/claude-haiku-latest";
+// TEMP: free-tier substitutes while credits are low.
+// To restore: swap these back to the original model IDs below and rebuild.
+//   MODEL_HAIKU  → "~anthropic/claude-haiku-latest"
+//   MODEL_OPUS   → "anthropic/claude-opus-4-7"
+//   MODEL_GEMINI → "google/gemini-3.1-flash-lite"
+//   MODEL_TRIAGE → remove (triage_loop.rs reverts to MODEL_HAIKU)
+pub const MODEL_HAIKU:  &str = "nvidia/nemotron-3-ultra-550b-a55b:free";
 pub const MODEL_SONNET: &str = "anthropic/claude-sonnet-4-6";
-pub const MODEL_OPUS:   &str = "anthropic/claude-opus-4-7";
+pub const MODEL_OPUS:   &str = "google/gemma-4-31b-it:free";
 pub const MODEL_GROK:       &str = "nvidia/nemotron-3-ultra-550b-a55b";
 pub const MODEL_GROK_BUILD: &str = "x-ai/grok-build-0.1";
 pub const MODEL_GROK_MULTI: &str = "x-ai/grok-4.20-multi-agent";
-pub const MODEL_GEMINI: &str = "google/gemini-3.1-flash-lite";
+pub const MODEL_GEMINI: &str = "google/gemma-4-31b-it:free";
+/// Dedicated triage gate model — instruction-following, structured JSON output.
+pub const MODEL_TRIAGE: &str = "google/gemma-4-26b-a4b-it:free";
 
 pub fn model_label(model_id: &str) -> &'static str {
     match model_id {
-        MODEL_HAIKU  => "Haiku   (fast / daily check-in)",
+        MODEL_HAIKU  => "Nemotron 550B (free / daily check-in)",
         MODEL_SONNET => "Sonnet  (balanced)",
-        MODEL_OPUS   => "Opus    (max intelligence)",
+        MODEL_OPUS   => "Gemma 4 31B (free / synthesis)",
         MODEL_GROK        => "Nemotron 550B",
         MODEL_GROK_BUILD  => "Grok Build 0.1",
         MODEL_GROK_MULTI  => "Grok 4.20 Multi-Agent (no tools)",
-        MODEL_GEMINI => "Gemini  (Flash Lite)",
+        MODEL_GEMINI => "Gemma 4 31B (free)",
+        MODEL_TRIAGE => "Gemma 4 26B (free / triage)",
         _            => "Unknown model",
     }
 }

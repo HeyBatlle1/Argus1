@@ -9,7 +9,7 @@
 //! Classification only. If something comes through designed to manipulate,
 //! it finds nothing to grab onto.
 
-use argus_core::agent::{AgentConfig, AgentEvent, MODEL_HAIKU};
+use argus_core::agent::{AgentConfig, AgentEvent, MODEL_TRIAGE};
 use argus_core::mcp::McpClient;
 use argus_core::shell::ShellPolicy;
 use argus_core::supabase::SupabaseClient;
@@ -100,7 +100,7 @@ async fn run_triage_loop(
 
                             let prompt = build_haiku_triage_prompt(&entry);
                             let haiku_config = AgentConfig {
-                                model: MODEL_HAIKU.to_string(),
+                                model: MODEL_TRIAGE.to_string(),
                                 ..agent_config.clone()
                             };
 
