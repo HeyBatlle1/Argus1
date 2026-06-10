@@ -535,16 +535,17 @@ async fn main() -> anyhow::Result<()> {
             match bot_token {
                 Some(token) => {
                     println!("[+] Telegram bot enabled");
-                    println!("[+] Daemon running (Ctrl+C to stop)");
-                    println!("Argus Telegram bot starting...");
-                    telegram::run_telegram_bot(token, config).await;
+                    tokio::spawn(async move {
+                        telegram::run_telegram_bot(token, config).await;
+                    });
                 }
                 None => {
                     println!("[!] No Telegram token found in vault or env - running idle");
-                    tokio::signal::ctrl_c().await?;
-                    println!("Daemon stopped");
                 }
             }
+            println!("[+] Daemon running (Ctrl+C to stop)");
+            tokio::signal::ctrl_c().await?;
+            println!("Daemon stopped");
         }
     }
 

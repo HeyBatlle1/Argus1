@@ -248,6 +248,8 @@ pub async fn run_telegram_bot(token: String, config: AgentConfig) {
         return;
     }
     let bot = Bot::new(token);
+    // Clear any stale webhook so the long-poll dispatcher doesn't time out on GetWebhookInfo.
+    let _ = bot.delete_webhook().await;
     let argus = Arc::new(Mutex::new(ArgusBot::new(config)));
 
     teloxide::repl(bot, move |bot: Bot, msg: Message| {
