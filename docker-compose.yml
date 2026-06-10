@@ -68,6 +68,8 @@ services:
     environment:
       - WORKSPACE_EXEC_TOKEN=${WORKSPACE_EXEC_TOKEN:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - ARGUS_TRIAGE_ACTIVE=${ARGUS_TRIAGE_ACTIVE:-0}
+      - ARGUS_DISCORD_ACTIVE=${ARGUS_DISCORD_ACTIVE:-0}
     ports:
       - "8081:8081"   # Static file server — agent-created HTML pages (browsable on host)
     expose:

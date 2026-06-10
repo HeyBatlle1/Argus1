@@ -64,6 +64,10 @@ if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
   echo "[!] TELEGRAM_BOT_TOKEN is empty — Telegram will be disabled"
 fi
 
+# Status flags for argus-workspace — agents can check these without seeing real creds
+export ARGUS_TRIAGE_ACTIVE=$( [ -n "$SUPABASE_ARGUS_URL" ] && [ -n "$SUPABASE_ARGUS_SERVICE_KEY" ] && echo "1" || echo "0" )
+export ARGUS_DISCORD_ACTIVE=$( [ -n "$DISCORD_BOT_TOKEN" ] && echo "1" || echo "0" )
+
 echo "[+] Secrets loaded — building and starting Argus stack..."
 docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d --build "$@"
 echo ""
