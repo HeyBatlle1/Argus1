@@ -113,6 +113,19 @@ async fn run_checkin_loop(
                 last_synthesis_cycle = Some(current_cycle);
             }
 
+            // ── Weekly skill gardening — prune dead skills, flag weak ones ──
+            if is_weekly_sweep {
+                if let Some(ref sc) = agent_config.skills {
+                    let gardener = argus_core::skills::SkillGardener {
+                        skills: sc.clone(),
+                        discord_bot_token: agent_config.discord_bot_token.clone(),
+                        discord_channel_id: agent_config.discord_channel_id,
+                        http: reqwest::Client::new(),
+                    };
+                    tokio::spawn(async move { gardener.run_maintenance().await });
+                }
+            }
+
             if needs_alert || needs_daily {
                 let schedule_summary = read_schedule_summary(&supabase).await;
 

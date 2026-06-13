@@ -562,20 +562,22 @@ where
     // ── Skill prefetch ────────────────────────────────────────────────────
     // Retrieve procedural skills relevant to this message and inject as guidance.
     // Runs in parallel with semantic memory but only when skills client is configured.
-    let skill_context = if let Some(ref sc) = config.skills {
+    // Also capture IDs so we can record_usage after the turn completes.
+    let (skill_context, injected_skill_ids) = if let Some(ref sc) = config.skills {
         match sc.search_relevant(user_message, 0.60, 4).await {
             Ok(skills) if !skills.is_empty() => {
                 eprintln!("[skills] {} relevant skill(s) found", skills.len());
-                SkillsClient::format_for_prompt(&skills)
+                let ids: Vec<String> = skills.iter().map(|s| s.id.clone()).collect();
+                (SkillsClient::format_for_prompt(&skills), ids)
             }
-            Ok(_) => String::new(),
+            Ok(_) => (String::new(), vec![]),
             Err(e) => {
                 eprintln!("[skills] Search failed (continuing without): {}", e);
-                String::new()
+                (String::new(), vec![])
             }
         }
     } else {
-        String::new()
+        (String::new(), vec![])
     };
 
     let mut tool_schemas: Vec<Value> = Vec::new();
@@ -898,6 +900,18 @@ where
         config.api_key.clone(), config.api_url.clone(), config.model.clone(),
         http_client.clone(), user_message.to_string(), content.clone(),
     );
+
+    // Record that injected skills contributed to a successful turn.
+    if !injected_skill_ids.is_empty() {
+        if let Some(sc) = config.skills.clone() {
+            let ids = injected_skill_ids.clone();
+            tokio::spawn(async move {
+                for id in ids {
+                    let _ = sc.record_usage(&id, true, None).await;
+                }
+            });
+        }
+    }
 
     on_event(AgentEvent::Response(content.clone()));
     Ok(content)
