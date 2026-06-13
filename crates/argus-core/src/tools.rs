@@ -442,6 +442,11 @@ fn validate_write_path(path: &str) -> Result<(), String> {
         "/sbin/",
         "/usr/bin/",
         "/usr/sbin/",
+        "/tmp/",
+        "/var/",
+        "/root/",
+        "/home/",
+        "/run/",
     ];
 
     for fragment in blocked {

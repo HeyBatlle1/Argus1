@@ -102,6 +102,9 @@ pub fn classify_risk(command: &str) -> RiskLevel {
         // Git as a weapon
         "git config --global",
         "git -c core",
+        // Symlinks — always reviewed; they can redirect writes outside the workspace
+        "ln -s",
+        "ln --symbolic",
     ];
 
     for pattern in high_patterns {
@@ -131,7 +134,6 @@ pub fn classify_risk(command: &str) -> RiskLevel {
         "touch",
         "chmod",
         "chown",
-        "ln -s",
         "docker run",
         "docker build",
         "docker stop",
@@ -392,6 +394,18 @@ impl Default for ShellPolicy {
             "fdisk",
             ":(){:|:&};:",
             "shred /dev",
+            // Symlinks pointing outside the workspace — redirect attacks
+            "ln -s /tmp",
+            "ln -s /etc",
+            "ln -s /var",
+            "ln -s /usr",
+            "ln -s /home",
+            "ln -s /root",
+            "ln -s /sys",
+            "ln -s /proc",
+            "ln -s /dev",
+            "ln -s /boot",
+            "ln -s /run",
         ] {
             blocked.insert(pattern.to_string());
         }
