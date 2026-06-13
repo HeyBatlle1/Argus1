@@ -148,9 +148,20 @@ export interface HistoryMessage {
 }
 
 // WebSocket protocol
+export interface ScheduledTask {
+  id: string;
+  agent: ModelId;
+  runAt: string | null;  // ISO string or null = run immediately
+  description: string;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  createdAt: string;
+}
+
 export type ClientMessage =
   | { type: 'user_message'; content: string }
   | { type: 'switch_model'; model: ModelId }
+  | { type: 'set_model_tools'; model: string; enabled: boolean }
+  | { type: 'schedule_task'; agent: string; run_at: string | null; description: string }
   | { type: 'cancel' }
   | { type: 'new_conversation' }
   | { type: 'load_conversation'; id: string }
@@ -170,4 +181,5 @@ export type ServerMessage =
   | { type: 'conversations_list'; conversations: Conversation[] }
   | { type: 'conversation_started'; id: string; title: string }
   | { type: 'skills_update'; skills: Skill[] }
-  | { type: 'activity_update'; entries: ActivityEntry[] };
+  | { type: 'activity_update'; entries: ActivityEntry[] }
+  | { type: 'task_scheduled'; id: string; agent: string; run_at: string | null; description: string };

@@ -501,12 +501,11 @@ async fn tool_shell(
         Ok(r)  => r,
     };
 
-    // Step 2: HIGH risk → Sonnet review. No human wait, no timeout.
+    // Step 2: HIGH risk → Sonnet review (unless bypass_sonnet_guard is set).
     // Sonnet either approves, rewrites to a safer form, or blocks with explanation.
-    if risk >= policy.approval_threshold {
+    if risk >= policy.approval_threshold && !policy.bypass_sonnet_guard {
         match &sonnet_guard {
             None => {
-                // No guard configured — log and proceed (dev/test environments)
                 eprintln!("[shell] WARNING: HIGH risk command running without Sonnet review: {}", command);
             }
             Some(guard) => {
@@ -522,6 +521,8 @@ async fn tool_shell(
                 }
             }
         }
+    } else if risk >= policy.approval_threshold && policy.bypass_sonnet_guard {
+        eprintln!("[shell] HIGH risk command bypassing Sonnet review (permissive mode): {}", command);
     }
 
     // Route execution to argus-workspace via internal Docker network

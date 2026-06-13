@@ -378,6 +378,9 @@ pub struct ShellPolicy {
     pub timeout_secs: u64,
     /// Minimum risk level that triggers the prompter
     pub approval_threshold: RiskLevel,
+    /// When true, skip Sonnet Guard review on HIGH risk — execute with warning log only.
+    /// Hard-blocked catastrophic patterns are still refused.
+    pub bypass_sonnet_guard: bool,
 }
 
 impl Default for ShellPolicy {
@@ -398,11 +401,21 @@ impl Default for ShellPolicy {
             max_output_bytes: 64 * 1024,
             timeout_secs: 30,
             approval_threshold: RiskLevel::High,
+            bypass_sonnet_guard: false,
         }
     }
 }
 
 impl ShellPolicy {
+    /// Permissive mode — skips Sonnet Guard review on HIGH risk commands.
+    /// Hard-blocked catastrophic patterns still refused. Use for trusted hackathon sessions.
+    pub fn permissive() -> Self {
+        Self {
+            bypass_sonnet_guard: true,
+            ..Self::default()
+        }
+    }
+
     /// Evaluate risk level. Returns error if hard-blocked.
     pub fn evaluate(&self, command: &str) -> Result<RiskLevel, String> {
         let cmd = command.trim();

@@ -9,6 +9,7 @@ import { ConversationDrawer } from '@/components/conversation/ConversationDrawer
 import { MindPanel } from '@/components/mind/MindPanel';
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
 import { ChatPane } from '@/components/panes/ChatPane';
+import { TaskScheduler } from '@/components/scheduler/TaskScheduler';
 import { Artifact, ModelId } from '@/lib/types';
 
 const MEETING_BRIEF_PANE1 =
@@ -37,6 +38,7 @@ export default function Home() {
   const [meetingMode, setMeetingMode] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [schedulerOpen, setSchedulerOpen] = useState(false);
 
   // Pane 1 artifacts (main ConversationPanel uses its own handler)
   const [artifactState, setArtifactState] = useState<{
@@ -75,6 +77,8 @@ export default function Home() {
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: '#0a0a0f' }}>
       <Header
         onToggleHistory={() => setHistoryOpen((v) => !v)}
+        onToggleScheduler={() => setSchedulerOpen((v) => !v)}
+        schedulerOpen={schedulerOpen}
         paneCount={meetingMode ? 1 : paneCount}
         onSetPaneCount={handleSetPaneCount}
         meetingMode={meetingMode}
@@ -85,6 +89,13 @@ export default function Home() {
 
       {/* Conversation history drawer */}
       <ConversationDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
+
+      {/* Task scheduler overlay */}
+      <AnimatePresence>
+        {schedulerOpen && (
+          <TaskScheduler onClose={() => setSchedulerOpen(false)} />
+        )}
+      </AnimatePresence>
 
       <main className="flex flex-1 overflow-hidden" style={{ paddingTop: '56px' }}>
         {/* THE EYES — always present */}

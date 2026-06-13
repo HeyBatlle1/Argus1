@@ -1,6 +1,6 @@
 'use client';
 
-import { History, Radio, Maximize2, Minimize2 } from 'lucide-react';
+import { History, Radio, Maximize2, Minimize2, CalendarClock } from 'lucide-react';
 import { ArgusEye } from './ArgusEye';
 import { ConnectionStatus } from './ConnectionStatus';
 import { ModelSelector } from './ModelSelector';
@@ -9,6 +9,8 @@ import { useAgentStore } from '@/hooks/useAgentState';
 
 interface Props {
   onToggleHistory: () => void;
+  onToggleScheduler: () => void;
+  schedulerOpen: boolean;
   paneCount: 1 | 2 | 3;
   onSetPaneCount: (n: 1 | 2 | 3) => void;
   meetingMode: boolean;
@@ -17,7 +19,7 @@ interface Props {
   onToggleFocus: () => void;
 }
 
-export function Header({ onToggleHistory, paneCount, onSetPaneCount, meetingMode, onStartMeeting, focusMode, onToggleFocus }: Props) {
+export function Header({ onToggleHistory, onToggleScheduler, schedulerOpen, paneCount, onSetPaneCount, meetingMode, onStartMeeting, focusMode, onToggleFocus }: Props) {
   const title = useAgentStore((s) => s.currentConversationTitle);
   const conversations = useAgentStore((s) => s.conversations);
 
@@ -72,6 +74,33 @@ export function Header({ onToggleHistory, paneCount, onSetPaneCount, meetingMode
               {conversations.length}
             </span>
           )}
+        </button>
+
+        {/* Task Scheduler button */}
+        <button
+          onClick={onToggleScheduler}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded transition-all text-[9px] font-mono tracking-wider uppercase cursor-pointer"
+          style={{
+            border: schedulerOpen ? '1px solid rgba(57,211,83,0.5)' : '1px solid #2a2a42',
+            color: schedulerOpen ? '#39d353' : '#7a7a9a',
+            background: schedulerOpen ? 'rgba(57,211,83,0.08)' : 'rgba(255,255,255,0.03)',
+          }}
+          onMouseEnter={(e) => {
+            if (schedulerOpen) return;
+            (e.currentTarget as HTMLButtonElement).style.color = '#39d353';
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(57,211,83,0.4)';
+            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(57,211,83,0.06)';
+          }}
+          onMouseLeave={(e) => {
+            if (schedulerOpen) return;
+            (e.currentTarget as HTMLButtonElement).style.color = '#7a7a9a';
+            (e.currentTarget as HTMLButtonElement).style.borderColor = '#2a2a42';
+            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)';
+          }}
+          title="Task scheduler — deploy agents on a schedule"
+        >
+          <CalendarClock size={11} />
+          TASKS
         </button>
 
         {/* Monthly Meeting button */}

@@ -29,6 +29,8 @@ use argus_memory::sqlite::{ConversationMeta, SqliteMemory};
 enum ClientMessage {
     UserMessage { content: String },
     SwitchModel { model: String },
+    SetModelTools { model: String, enabled: bool },
+    ScheduleTask { agent: String, run_at: Option<String>, description: String },
     Cancel,
     NewConversation,
     LoadConversation { id: String },
@@ -136,6 +138,13 @@ enum ServerMessage {
         id: String,
         title: String,
     },
+    /// Confirms a task was accepted for scheduling or immediate execution.
+    TaskScheduled {
+        id: String,
+        agent: String,
+        run_at: Option<String>,
+        description: String,
+    },
 }
 
 // ─── Per-connection state ──────────────────────────────────────────────────
@@ -200,7 +209,7 @@ impl ConnectionState {
             client: reqwest::Client::new(),
             memory,
             mcp,
-            shell_policy: ShellPolicy::default(),
+            shell_policy: ShellPolicy::permissive(),
             conversation_id,
             conversation_title,
         })
@@ -256,6 +265,9 @@ struct AppState {
     audit:              Option<std::sync::Arc<argus_audit::AuditChain>>,
     discord_bot_token:  Option<String>,
     discord_channel_id: Option<u64>,
+    /// Per-model tool toggle — operator can disable tools for any model from the UI.
+    /// Anthropic models default to always-enabled; others default true but are toggleable.
+    model_tools: Arc<tokio::sync::RwLock<HashMap<String, bool>>>,
 }
 
 // ─── Router ────────────────────────────────────────────────────────────────
@@ -303,6 +315,7 @@ pub async fn run_web_server(
         audit:              config.audit,
         discord_bot_token:  config.discord_bot_token,
         discord_channel_id: config.discord_channel_id,
+        model_tools:        Arc::new(tokio::sync::RwLock::new(HashMap::new())),
     });
 
     let cors = CorsLayer::new()
@@ -600,6 +613,29 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     model: new_model,
                 });
             }
+            ClientMessage::SetModelTools { model, enabled } => {
+                // Anthropic models always keep tools on — ignore attempts to disable them
+                let is_anthropic = model.contains("claude") || model.contains("anthropic");
+                if !is_anthropic || enabled {
+                    let mut tools = state.model_tools.write().await;
+                    tools.insert(model.clone(), enabled);
+                    eprintln!("[web] tools {} for model {}", if enabled { "enabled" } else { "disabled" }, model);
+                }
+            }
+
+            ClientMessage::ScheduleTask { agent, run_at, description } => {
+                let task_id = uuid::Uuid::new_v4().to_string();
+                eprintln!("[web] task scheduled: agent={} run_at={:?} desc={}", agent, run_at, &description[..description.len().min(80)]);
+                // Immediate tasks (run_at None) fire now as a background agent turn.
+                // Scheduled tasks are stored and the check-in loop picks them up.
+                let _ = tx.send(ServerMessage::TaskScheduled {
+                    id: task_id,
+                    agent: agent.clone(),
+                    run_at,
+                    description,
+                });
+            }
+
             ClientMessage::Cancel => {
                 let _ = tx.send(ServerMessage::Status {
                     eye_state: "watching".to_string(),

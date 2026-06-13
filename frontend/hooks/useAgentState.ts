@@ -5,7 +5,7 @@ import {
   EyeState, ModelId, AccessTier,
   Message, Tool, ToolCall,
   Memory, Curiosity, InnerTruth, PartnershipDynamic, Breakthrough,
-  Conversation, Skill, ActivityEntry,
+  Conversation, Skill, ActivityEntry, ScheduledTask,
   ServerMessage,
 } from '@/lib/types';
 import { ArgusConnection } from '@/lib/connection';
@@ -112,6 +112,12 @@ interface AgentStore {
   skills: Skill[];
   activity: ActivityEntry[];
 
+  // Tool toggles (allied models only; anthropic always on)
+  toolsEnabled: Record<string, boolean>;
+
+  // Task scheduler
+  scheduledTasks: ScheduledTask[];
+
   // Internal
   _ws: ArgusConnection | null;
 
@@ -119,6 +125,8 @@ interface AgentStore {
   sendMessage: (content: string) => void;
   switchModel: (model: ModelId) => void;
   setEyeState: (state: EyeState) => void;
+  setModelTools: (model: string, enabled: boolean) => void;
+  scheduleTask: (agent: string, runAt: string | null, description: string) => void;
   initConnection: () => void;
   newConversation: () => void;
   loadConversation: (id: string) => void;
@@ -163,6 +171,14 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   skills: [],
   activity: [],
+
+  toolsEnabled: {
+    'grok': true,
+    'grok-build': true,
+    'grok-multi': true,
+    'gemini-flash': true,
+  },
+  scheduledTasks: [],
 
   _ws: null,
 
@@ -321,6 +337,22 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         break;
       }
 
+      case 'task_scheduled':
+        set((prev) => ({
+          scheduledTasks: [
+            {
+              id: msg.id,
+              agent: msg.agent as ModelId,
+              runAt: msg.run_at,
+              description: msg.description,
+              status: 'pending' as const,
+              createdAt: new Date().toISOString(),
+            },
+            ...prev.scheduledTasks,
+          ],
+        }));
+        break;
+
       case 'error':
         set((prev) => ({
           eyeState: 'watching',
@@ -383,6 +415,15 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
 
   setEyeState: (state: EyeState) => set({ eyeState: state }),
+
+  setModelTools: (model: string, enabled: boolean) => {
+    set((prev) => ({ toolsEnabled: { ...prev.toolsEnabled, [model]: enabled } }));
+    get()._ws?.send({ type: 'set_model_tools', model, enabled });
+  },
+
+  scheduleTask: (agent: string, runAt: string | null, description: string) => {
+    get()._ws?.send({ type: 'schedule_task', agent, run_at: runAt, description });
+  },
 
   newConversation: () => {
     get()._ws?.send({ type: 'new_conversation' });
