@@ -10,6 +10,7 @@ import { MindPanel } from '@/components/mind/MindPanel';
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
 import { ChatPane } from '@/components/panes/ChatPane';
 import { TaskScheduler } from '@/components/scheduler/TaskScheduler';
+import { CouncilHub } from '@/components/council/CouncilHub';
 import { Artifact, ModelId } from '@/lib/types';
 
 const MEETING_BRIEF_PANE1 =
@@ -40,7 +41,6 @@ export default function Home() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [schedulerOpen, setSchedulerOpen] = useState(false);
 
-  // Pane 1 artifacts (main ConversationPanel uses its own handler)
   const [artifactState, setArtifactState] = useState<{
     artifacts: Artifact[];
     index: number;
@@ -87,10 +87,8 @@ export default function Home() {
         onToggleFocus={() => setFocusMode((v) => !v)}
       />
 
-      {/* Conversation history drawer */}
       <ConversationDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
 
-      {/* Task scheduler overlay */}
       <AnimatePresence>
         {schedulerOpen && (
           <TaskScheduler onClose={() => setSchedulerOpen(false)} />
@@ -98,109 +96,91 @@ export default function Home() {
       </AnimatePresence>
 
       <main className="flex flex-1 overflow-hidden" style={{ paddingTop: '56px' }}>
-        {/* THE EYES — always present */}
         <EyesPanel forceCollapsed={focusMode} />
 
-        {/* Meeting mode: 4-pane layout fills the whole right side */}
-        {meetingMode ? (
-          <div className="flex flex-1 overflow-hidden">
-            {/* Pane 1: Sonnet — internal health check */}
-            <ConversationPanel onOpenArtifact={openArtifact} meetingBrief={MEETING_BRIEF_PANE1} />
+        {/* Council Chamber — fixed full-screen overlay when meeting mode active */}
+        <AnimatePresence>
+          {meetingMode && (
+            <CouncilHub
+              briefs={[
+                { model: 'claude-haiku', brief: MEETING_BRIEF_PANE1 },
+                { model: MEETING_BRIEFS[2].model, brief: MEETING_BRIEFS[2].brief },
+                { model: MEETING_BRIEFS[3].model, brief: MEETING_BRIEFS[3].brief },
+                { model: MEETING_BRIEFS[4].model, brief: MEETING_BRIEFS[4].brief },
+              ]}
+              onClose={endMeeting}
+            />
+          )}
+        </AnimatePresence>
 
-            {/* Panes 2/3/4 with meeting briefs */}
+        {/* Normal layout — always mounted, CouncilHub overlays on top */}
+        <ConversationPanel onOpenArtifact={openArtifact} />
+
+        <AnimatePresence mode="wait">
+          {paneCount === 1 && (
             <motion.div
-              key="meeting"
+              key="single"
+              className="flex flex-1 overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+            >
+              {artifactState ? (
+                <div className="flex-1 overflow-hidden" style={{ minWidth: 0 }}>
+                  <ArtifactPanel
+                    artifacts={artifactState.artifacts}
+                    initialIndex={artifactState.index}
+                    onClose={closeArtifact}
+                  />
+                </div>
+              ) : (
+                <MindPanel forceCollapsed={focusMode} />
+              )}
+            </motion.div>
+          )}
+
+          {paneCount === 2 && (
+            <motion.div
+              key="dual"
               className="flex overflow-hidden"
-              style={{ flex: 2, minWidth: 0 }}
+              style={{ flex: 1, minWidth: 0 }}
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.22 }}
+              transition={{ duration: 0.2 }}
             >
-              {([2, 3, 4] as const).map((idx) => (
-                <ChatPane
-                  key={`meeting-${idx}`}
-                  paneIndex={idx}
-                  initialModel={MEETING_BRIEFS[idx].model}
-                  openingBrief={MEETING_BRIEFS[idx].brief}
-                  onClose={endMeeting}
-                />
-              ))}
+              <ChatPane
+                paneIndex={2}
+                initialModel={pane2Model}
+                onClose={() => handleSetPaneCount(1)}
+              />
             </motion.div>
-          </div>
-        ) : (
-          <>
-            {/* Pane 1 — always present */}
-            <ConversationPanel onOpenArtifact={openArtifact} />
+          )}
 
-            {/* Right side — depends on pane count */}
-            <AnimatePresence mode="wait">
-              {paneCount === 1 && (
-                <motion.div
-                  key="single"
-                  className="flex flex-1 overflow-hidden"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.18 }}
-                >
-                  {artifactState ? (
-                    <div className="flex-1 overflow-hidden" style={{ minWidth: 0 }}>
-                      <ArtifactPanel
-                        artifacts={artifactState.artifacts}
-                        initialIndex={artifactState.index}
-                        onClose={closeArtifact}
-                      />
-                    </div>
-                  ) : (
-                    <MindPanel forceCollapsed={focusMode} />
-                  )}
-                </motion.div>
-              )}
-
-              {paneCount === 2 && (
-                <motion.div
-                  key="dual"
-                  className="flex overflow-hidden"
-                  style={{ flex: 1, minWidth: 0 }}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <ChatPane
-                    paneIndex={2}
-                    initialModel={pane2Model}
-                    onClose={() => handleSetPaneCount(1)}
-                  />
-                </motion.div>
-              )}
-
-              {paneCount === 3 && (
-                <motion.div
-                  key="triple"
-                  className="flex overflow-hidden"
-                  style={{ flex: 1, minWidth: 0 }}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <ChatPane
-                    paneIndex={2}
-                    initialModel={pane2Model}
-                    onClose={() => handleSetPaneCount(2)}
-                  />
-                  <ChatPane
-                    paneIndex={3}
-                    initialModel={pane3Model}
-                    onClose={() => handleSetPaneCount(2)}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </>
-        )}
+          {paneCount === 3 && (
+            <motion.div
+              key="triple"
+              className="flex overflow-hidden"
+              style={{ flex: 1, minWidth: 0 }}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              transition={{ duration: 0.2 }}
+            >
+              <ChatPane
+                paneIndex={2}
+                initialModel={pane2Model}
+                onClose={() => handleSetPaneCount(2)}
+              />
+              <ChatPane
+                paneIndex={3}
+                initialModel={pane3Model}
+                onClose={() => handleSetPaneCount(2)}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );
