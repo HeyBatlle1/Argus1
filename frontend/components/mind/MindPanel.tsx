@@ -16,6 +16,7 @@ import { BreakthroughMoments } from './BreakthroughMoments';
 import { SkillsList } from './SkillsList';
 import { ActivityFeed } from './ActivityFeed';
 import { SemanticField } from './SemanticField';
+import { ScheduleChronicle } from './ScheduleChronicle';
 
 // ExecutionFlow uses @xyflow/react which needs DOM — import with ssr:false
 const ExecutionFlow = dynamic(
@@ -27,16 +28,17 @@ const ExecutionFlow = dynamic(
   )}
 );
 
-type View = 'mind' | 'field' | 'flow';
+type View = 'mind' | 'field' | 'flow' | 'schedule';
 
 interface Props {
   forceCollapsed?: boolean;
 }
 
 const TAB_LABELS: { id: View; label: string }[] = [
-  { id: 'mind',  label: 'MIND'  },
-  { id: 'field', label: 'FIELD' },
-  { id: 'flow',  label: 'FLOW'  },
+  { id: 'mind',     label: 'MIND'  },
+  { id: 'field',    label: 'FIELD' },
+  { id: 'flow',     label: 'FLOW'  },
+  { id: 'schedule', label: 'SCHED' },
 ];
 
 export function MindPanel({ forceCollapsed = false }: Props) {
@@ -52,7 +54,8 @@ export function MindPanel({ forceCollapsed = false }: Props) {
   const breakthroughs = useAgentStore((s) => s.breakthroughs);
   const skills      = useAgentStore((s) => s.skills);
   const activity    = useAgentStore((s) => s.activity);
-  const activeToolCalls = useAgentStore((s) => s.activeToolCalls);
+  const activeToolCalls  = useAgentStore((s) => s.activeToolCalls);
+  const scheduledTasks   = useAgentStore((s) => s.scheduledTasks);
 
   return (
     <motion.div
@@ -112,7 +115,11 @@ export function MindPanel({ forceCollapsed = false }: Props) {
             <div className="flex border-b border-argus-border flex-shrink-0" style={{ background: 'rgba(255,255,255,0.015)' }}>
               {TAB_LABELS.map(({ id, label }) => {
                 const isActive = view === id;
-                const badge = id === 'flow' && activeToolCalls.length > 0 ? activeToolCalls.length : undefined;
+                const badge =
+                  id === 'flow' && activeToolCalls.length > 0 ? activeToolCalls.length :
+                  id === 'schedule' && scheduledTasks.filter(t => t.status === 'pending').length > 0
+                    ? scheduledTasks.filter(t => t.status === 'pending').length
+                    : undefined;
                 return (
                   <button
                     key={id}
@@ -140,8 +147,9 @@ export function MindPanel({ forceCollapsed = false }: Props) {
 
             {/* Tab content */}
             <div className="flex-1 overflow-hidden min-h-0">
-              {view === 'field' && <SemanticField />}
-              {view === 'flow'  && <ExecutionFlow />}
+              {view === 'field'    && <SemanticField />}
+              {view === 'flow'     && <ExecutionFlow />}
+              {view === 'schedule' && <ScheduleChronicle />}
               {view === 'mind'  && (
                 <div className="h-full overflow-y-auto">
                   {/* GUEST tier */}
