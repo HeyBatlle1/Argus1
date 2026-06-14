@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Header } from '@/components/header/Header';
 import { EyesPanel } from '@/components/eyes/EyesPanel';
@@ -11,6 +11,7 @@ import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
 import { ChatPane } from '@/components/panes/ChatPane';
 import { TaskScheduler } from '@/components/scheduler/TaskScheduler';
 import { CouncilHub } from '@/components/council/CouncilHub';
+import { CommandPalette } from '@/components/shared/CommandPalette';
 import { Artifact, ModelId } from '@/lib/types';
 
 const MEETING_BRIEF_PANE1 =
@@ -40,6 +41,19 @@ export default function Home() {
   const [focusMode, setFocusMode] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [schedulerOpen, setSchedulerOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+
+  // ⌘K / Ctrl+K global shortcut
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setCmdOpen((v) => !v);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const [artifactState, setArtifactState] = useState<{
     artifacts: Artifact[];
@@ -88,6 +102,16 @@ export default function Home() {
       />
 
       <ConversationDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
+
+      {/* ⌘K Command Palette */}
+      <CommandPalette
+        open={cmdOpen}
+        onClose={() => setCmdOpen(false)}
+        onStartMeeting={startMeeting}
+        onToggleFocus={() => setFocusMode((v) => !v)}
+        onOpenScheduler={() => setSchedulerOpen(true)}
+        onOpenHistory={() => setHistoryOpen(true)}
+      />
 
       <AnimatePresence>
         {schedulerOpen && (

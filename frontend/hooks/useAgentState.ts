@@ -118,6 +118,9 @@ interface AgentStore {
   // Task scheduler
   scheduledTasks: ScheduledTask[];
 
+  // NexusCore pulse intensity (0-14, driven by tool activity)
+  corePulse: number;
+
   // Internal
   _ws: ArgusConnection | null;
 
@@ -179,6 +182,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     'gemini-flash': true,
   },
   scheduledTasks: [],
+  corePulse: 4,
 
   _ws: null,
 
@@ -221,6 +225,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         set((prev) => ({
           eyeState: 'executing',
           activeToolCalls: [...prev.activeToolCalls, tc],
+          corePulse: Math.min(14, prev.corePulse + 3),
           activity: [entry, ...prev.activity].slice(0, 50),
           tools: prev.tools.map((t) =>
             t.name === msg.name ? { ...t, state: 'active' as const } : t
@@ -248,6 +253,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
               ? { ...tc, result: msg.result, success: msg.success, state: 'complete' as const, completedAt: now }
               : tc
           ),
+          corePulse: Math.max(2, prev.corePulse - 1),
           messages: prev.messages.map((m) => {
             if (!m.toolCalls?.some((tc) => tc.id === callId)) return m;
             return {
@@ -292,6 +298,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           isStreaming: false,
           eyeState: 'complete',
           activeToolCalls: [],
+          corePulse: 3,
         }));
         setTimeout(() => set({ eyeState: 'watching' }), 1500);
         break;
