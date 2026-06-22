@@ -7,7 +7,7 @@ import { InputArea } from './InputArea';
 import { Artifact } from '@/lib/types';
 import { StarfieldBackground } from '@/components/shared/StarfieldBackground';
 import { Plus } from 'lucide-react';
-import { MODEL_CONFIG } from '@/lib/models';
+import { getModelConfig } from '@/lib/models';
 import { EYE_COLORS } from '@/lib/constants';
 import { isBuilderModel, BUILDER_THEME } from '@/lib/builder';
 
@@ -28,7 +28,7 @@ export function ConversationPanel({ onOpenArtifact, meetingBrief, focusMode = fa
   const activeModel = useAgentStore((s) => s.activeModel);
   const wsLatency = useAgentStore((s) => s.wsLatency);
   const activeToolCalls = useAgentStore((s) => s.activeToolCalls);
-  const modelCfg = MODEL_CONFIG[activeModel];
+  const modelCfg = getModelConfig(activeModel);
   const builderMode = isBuilderModel(activeModel);
 
   const briefSentRef = useRef(false);

@@ -162,6 +162,20 @@ struct ConnectionState {
     conversation_title: String,
 }
 
+/// Canonical frontend model aliases — maps legacy DB values and OpenRouter IDs.
+fn normalize_frontend_model(raw: &str) -> &'static str {
+    match raw.trim().to_lowercase().as_str() {
+        "claude-haiku" | "haiku" | "anthropic/claude-haiku-4-5" => "claude-haiku",
+        "claude-sonnet" | "sonnet" | "anthropic/claude-sonnet-4-6" => "claude-sonnet",
+        "claude-opus" | "opus" | "google/gemma-4-31b-it:free" => "claude-opus",
+        "grok" | "nemotron" | "x-ai/grok-4.20" | "grok-4" | "grok-4.20" => "grok",
+        "grok-build" | "grok build" | "x-ai/grok-build-0.1" => "grok-build",
+        "grok-multi" | "x-ai/grok-4.20-multi-agent" => "grok-multi",
+        "gemini-flash" | "gemini" | "google/gemini-3.1-pro-preview" => "gemini-flash",
+        _ => "grok-build",
+    }
+}
+
 impl ConnectionState {
     /// `surface` — conversation namespace: `web` (default), `council`, etc.
     /// `initial_model` — frontend model alias to select on connect (e.g. `grok-build`).
@@ -196,7 +210,12 @@ impl ConnectionState {
             match memory.latest_conversation() {
                 Ok(Some(meta)) if meta.surface == "web" => {
                     let hist = memory.load_history_str(&meta.id).unwrap_or_default();
-                    let fm = meta.model.unwrap_or_else(|| "grok-build".to_string());
+                    let fm = meta
+                        .model
+                        .as_deref()
+                        .map(normalize_frontend_model)
+                        .unwrap_or("grok-build")
+                        .to_string();
                     (meta.id, meta.title, hist, fm)
                 }
                 _ => {
@@ -220,7 +239,9 @@ impl ConnectionState {
         let mut mcp = McpClient::new();
         let _ = mcp.connect_all();
 
-        let default_frontend = initial_model.unwrap_or(restored_frontend.as_str());
+        let default_frontend = normalize_frontend_model(
+            initial_model.unwrap_or(restored_frontend.as_str()),
+        );
         let mut state = Self {
             config,
             frontend_model: default_frontend.to_string(),
@@ -240,7 +261,8 @@ impl ConnectionState {
 
     /// Map frontend model ID alias → OpenRouter model ID + persona
     fn apply_model_switch(&mut self, frontend_id: &str) {
-        let openrouter_id = match frontend_id {
+        let alias = normalize_frontend_model(frontend_id);
+        let openrouter_id = match alias {
             "claude-haiku"  => MODEL_HAIKU,
             "claude-sonnet" => MODEL_SONNET,
             "claude-opus"   => MODEL_OPUS,
@@ -248,11 +270,11 @@ impl ConnectionState {
             "grok-build"    => MODEL_GROK_BUILD,
             "grok-multi"    => MODEL_GROK_MULTI,
             "gemini-flash"  => MODEL_GEMINI,
-            other           => other,
+            _               => MODEL_GROK_BUILD,
         };
-        self.frontend_model = frontend_id.to_string();
+        self.frontend_model = alias.to_string();
         self.config.model = openrouter_id.to_string();
-        self.config.frontend_persona = Some(frontend_id.to_string());
+        self.config.frontend_persona = Some(alias.to_string());
     }
 
     fn current_frontend_model(&self) -> String {

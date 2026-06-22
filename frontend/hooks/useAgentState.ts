@@ -13,6 +13,7 @@ import { parseArtifacts } from '@/lib/artifacts';
 import { DEFAULT_TOOLS, WS_URL } from '@/lib/constants';
 import { getModelTier } from '@/lib/models';
 import { PRIMARY_CODER } from '@/lib/builder';
+import { normalizeModelId } from '@/lib/models';
 import { RealConnection } from './useWebSocket';
 
 // ─── Dev-mode seed data (only loaded when no WS_URL is set) ───────────────
@@ -210,9 +211,9 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           connected: true,
           vaultKeys: msg.vault_keys ?? [],
           mcpServers: msg.mcp_servers ?? [],
-          // Sync to whatever model the daemon actually started with
-          activeModel: (msg.model as ModelId) ?? prev.activeModel,
-          accessTier: msg.model ? getModelTier(msg.model as ModelId) : prev.accessTier,
+          // Sync to whatever model the daemon actually started with (normalize legacy IDs)
+          activeModel: msg.model ? normalizeModelId(msg.model) : prev.activeModel,
+          accessTier: msg.model ? getModelTier(msg.model) : prev.accessTier,
         }));
         break;
 
@@ -320,7 +321,11 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       }
 
       case 'status':
-        set({ eyeState: msg.eye_state, activeModel: msg.model, accessTier: getModelTier(msg.model) });
+        set({
+          eyeState: msg.eye_state,
+          activeModel: normalizeModelId(msg.model),
+          accessTier: getModelTier(msg.model),
+        });
         break;
 
       case 'memory_update':

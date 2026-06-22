@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown } from 'lucide-react';
 import { useAgentStore } from '@/hooks/useAgentState';
-import { MODEL_CONFIG, MODELS_IN_ORDER } from '@/lib/models';
+import { MODEL_CONFIG, MODELS_IN_ORDER, getModelConfig } from '@/lib/models';
 import { TierBadge } from '@/components/shared/TierBadge';
 import { ModelId } from '@/lib/types';
 
@@ -12,7 +12,7 @@ export function ModelSelector() {
   const [open, setOpen] = useState(false);
   const activeModel = useAgentStore((s) => s.activeModel);
   const switchModel = useAgentStore((s) => s.switchModel);
-  const cfg = MODEL_CONFIG[activeModel];
+  const cfg = getModelConfig(activeModel);
 
   const builderModel = MODELS_IN_ORDER.filter((m) => MODEL_CONFIG[m].isPrimaryCoder);
   const royalModels = MODELS_IN_ORDER.filter((m) => MODEL_CONFIG[m].tier === 'royal');

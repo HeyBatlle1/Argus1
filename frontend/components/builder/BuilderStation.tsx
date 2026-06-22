@@ -1,14 +1,14 @@
 'use client';
 
 import { useAgentStore } from '@/hooks/useAgentState';
-import { MODEL_CONFIG } from '@/lib/models';
+import { getModelConfig } from '@/lib/models';
 import { BUILDER_THEME, PRIMARY_CODER } from '@/lib/builder';
 
 export function BuilderStation() {
   const activeModel = useAgentStore((s) => s.activeModel);
   const summonBuilder = useAgentStore((s) => s.summonBuilder);
 
-  const cfg = MODEL_CONFIG[PRIMARY_CODER];
+  const cfg = getModelConfig(PRIMARY_CODER);
   const isActive = activeModel === PRIMARY_CODER;
 
   return (

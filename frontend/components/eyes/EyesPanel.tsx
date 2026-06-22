@@ -11,7 +11,7 @@ import { SystemInfo } from './SystemInfo';
 import { NexusCore } from './NexusCore';
 import { NexusSignalStrip } from './NexusSignalStrip';
 import { BuilderStation } from '@/components/builder/BuilderStation';
-import { MODEL_CONFIG, CONSTELLATION_MODELS } from '@/lib/models';
+import { MODEL_CONFIG, CONSTELLATION_MODELS, getModelConfig } from '@/lib/models';
 import { isBuilderModel } from '@/lib/builder';
 
 interface Props {
@@ -33,7 +33,7 @@ export function EyesPanel({ forceCollapsed = false }: Props) {
   const activity    = useAgentStore((s) => s.activity);
   const switchModel = useAgentStore((s) => s.switchModel);
 
-  const modelCfg = MODEL_CONFIG[activeModel];
+  const modelCfg = getModelConfig(activeModel);
   const builderMode = isBuilderModel(activeModel);
   const discourse = activity.slice(0, 3);
 

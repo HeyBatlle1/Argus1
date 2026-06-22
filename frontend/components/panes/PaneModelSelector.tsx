@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown } from 'lucide-react';
-import { MODEL_CONFIG, MODELS_IN_ORDER } from '@/lib/models';
+import { MODEL_CONFIG, MODELS_IN_ORDER, getModelConfig } from '@/lib/models';
 import { ModelId } from '@/lib/types';
 
 interface Props {
@@ -13,7 +13,7 @@ interface Props {
 
 export function PaneModelSelector({ model, onSwitch }: Props) {
   const [open, setOpen] = useState(false);
-  const cfg = MODEL_CONFIG[model];
+  const cfg = getModelConfig(model);
 
   function select(id: ModelId) {
     onSwitch(id);

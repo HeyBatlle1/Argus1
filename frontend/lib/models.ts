@@ -132,7 +132,43 @@ export const CONSTELLATION_MODELS: ModelId[] = MODELS_IN_ORDER.filter(
   (id) => MODEL_CONFIG[id].inConstellation,
 );
 
-export function getModelTier(model: ModelId): AccessTier {
-  if (MODEL_CONFIG[model]?.isPrimaryCoder) return 'royal';
-  return MODEL_CONFIG[model]?.tier ?? 'royal';
+const DEFAULT_MODEL: ModelId = 'grok-build';
+
+/** Map legacy DB values, OpenRouter IDs, and aliases → canonical frontend ModelId. */
+export function normalizeModelId(raw: string | null | undefined): ModelId {
+  if (!raw) return DEFAULT_MODEL;
+  const key = raw.trim().toLowerCase();
+  if (key in MODEL_CONFIG) return key as ModelId;
+
+  const aliases: Record<string, ModelId> = {
+    haiku: 'claude-haiku',
+    sonnet: 'claude-sonnet',
+    opus: 'claude-opus',
+    gemini: 'gemini-flash',
+    nemotron: 'grok',
+    'grok-4': 'grok',
+    'grok-4.20': 'grok',
+    'grok-4.3': 'grok',
+    'grok build': 'grok-build',
+    'grok-build-0.1': 'grok-build',
+    'anthropic/claude-haiku-4-5': 'claude-haiku',
+    'anthropic/claude-sonnet-4-6': 'claude-sonnet',
+    'google/gemma-4-31b-it:free': 'claude-opus',
+    'google/gemini-3.1-pro-preview': 'gemini-flash',
+    'x-ai/grok-4.20': 'grok',
+    'x-ai/grok-build-0.1': 'grok-build',
+    'x-ai/grok-4.20-multi-agent': 'grok-multi',
+  };
+
+  return aliases[key] ?? DEFAULT_MODEL;
+}
+
+export function getModelConfig(model: string | ModelId): ModelConfig {
+  return MODEL_CONFIG[normalizeModelId(model)];
+}
+
+export function getModelTier(model: string | ModelId): AccessTier {
+  const cfg = getModelConfig(model);
+  if (cfg.isPrimaryCoder) return 'royal';
+  return cfg.tier;
 }
