@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+
 import { motion, AnimatePresence } from 'framer-motion';
 import dynamic from 'next/dynamic';
 import { ChevronRight } from 'lucide-react';
@@ -34,16 +34,18 @@ interface Props {
   forceCollapsed?: boolean;
 }
 
-const TAB_LABELS: { id: View; label: string }[] = [
-  { id: 'mind',     label: 'MIND'  },
-  { id: 'field',    label: 'FIELD' },
-  { id: 'flow',     label: 'FLOW'  },
-  { id: 'schedule', label: 'SCHED' },
+const TAB_LABELS: { id: View; label: string; hint: string }[] = [
+  { id: 'mind',     label: 'MIND',   hint: 'memory · skills' },
+  { id: 'field',    label: 'GRAPH',  hint: 'knowledge map' },
+  { id: 'flow',     label: 'FLOW',   hint: 'tool graph' },
+  { id: 'schedule', label: 'SCHED',  hint: 'tasks' },
 ];
 
 export function MindPanel({ forceCollapsed = false }: Props) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [view, setView] = useState<View>('mind');
+  const collapsed = useAgentStore((s) => s.mindCollapsed);
+  const setCollapsed = useAgentStore((s) => s.setMindCollapsed);
+  const view = useAgentStore((s) => s.mindView) as View;
+  const setView = useAgentStore((s) => s.setMindView);
   const isCollapsed = forceCollapsed || collapsed;
   const tier = useAccessTier();
 

@@ -57,7 +57,7 @@ Three Docker containers in production:
 |--------|------------|
 | Secrets in plaintext | ChaCha20-Poly1305 encrypted vault, master key in hardware keychain |
 | Container escape | Workspace exec server requires X-Argus-Auth header on every request |
-| Command injection | Three-tier risk classifier: LOW / MEDIUM / HIGH with Telegram approval loop |
+| Command injection | Three-tier risk classifier: LOW executes immediately, MEDIUM logs a warning, HIGH routes through Sonnet review before execution; Telegram notifies on consequential runs |
 | Interpreter bypass | Python, Node, Ruby, Perl one-liners classified HIGH risk |
 | SSRF / network exfiltration | Egress policy blocks RFC 1918, AWS IMDS, loopback, internal hostnames explicitly |
 | Arbitrary file writes | Path policy uses canonical path for both check and write; case-sensitive matching |

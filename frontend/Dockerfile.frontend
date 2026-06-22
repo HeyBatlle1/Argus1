@@ -6,11 +6,9 @@ RUN npm ci
 
 COPY . .
 
-# NEXT_PUBLIC_* vars must be baked in at build time — not runtime
+# WS URL is public; auth token is runtime-only (ARGUS_WS_TOKEN → /api/ws-token)
 ARG NEXT_PUBLIC_WS_URL=ws://localhost:9000/ws
 ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
-ARG NEXT_PUBLIC_WS_TOKEN=
-ENV NEXT_PUBLIC_WS_TOKEN=$NEXT_PUBLIC_WS_TOKEN
 
 RUN npm run build
 

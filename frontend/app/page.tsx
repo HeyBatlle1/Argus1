@@ -13,29 +13,15 @@ import { TaskScheduler } from '@/components/scheduler/TaskScheduler';
 import { CouncilHub } from '@/components/council/CouncilHub';
 import { CommandPalette } from '@/components/shared/CommandPalette';
 import { Artifact, ModelId } from '@/lib/types';
-
-const MEETING_BRIEF_PANE1 =
-  'MONTHLY MEETING — INTERNAL HEALTH CHECK: You are Haiku, opening this meeting as coordinator. Three other instances are running right now — Grok on AI landscape, Gemini on tech trends, Opus on synthesis. You will all post to Discord and read each other\'s work. Your job is the honest internal baseline: look at the skill library and pick the 3 capabilities that have seen the most real use, check whether memory reflects what actually happened in recent work, and identify one place where tool use has been inefficient. Report what you find. The meeting needs a real baseline — not a presentation. Post to Discord when done.';
-
-const MEETING_BRIEFS: Record<2 | 3 | 4, { model: ModelId; brief: string }> = {
-  2: {
-    model: 'grok-build',
-    brief:
-      'MONTHLY MEETING — AI LANDSCAPE INTEL: You are covering the AI landscape for this meeting. Haiku is running the internal health check, Gemini is covering tech and infrastructure, and Opus will read your findings alongside Gemini\'s for the synthesis. Research the last 30 days: the most significant model releases or capability shifts, any safety or alignment developments worth noting, and one signal that isn\'t mainstream yet but should be watched. Be specific — name models, name organizations, name dates. If a search turns up nothing worth calling out, say so. Post to Discord when done.',
-  },
-  3: {
-    model: 'gemini-flash',
-    brief:
-      'MONTHLY MEETING — TECH & INFRA TRENDS: You are covering the developer and infrastructure landscape for this meeting. Haiku is running the internal health check, Grok is covering AI developments, and Opus will read your findings alongside Grok\'s for the synthesis. Research the last 30 days: what moved in tooling, cloud, or open-source that actually matters; any security or supply chain issues worth watching; one project or library gaining real traction and why. If something is overhyped, say so. Opus is reading this — give them something real to work with. Post to Discord when done.',
-  },
-  4: {
-    model: 'claude-opus',
-    brief:
-      'MONTHLY MEETING — STRATEGIC SYNTHESIS: Grok just posted the AI landscape briefing and Gemini just posted the tech and infrastructure briefing — both are in Discord. Read what they actually wrote. Your job is genuine synthesis: find the real thread between the two reports if one exists, name the single most important thing this system should be paying attention to this month and why, and give a clear recommendation for the next 30 days. If the two reports connect in a meaningful way, show it. If they don\'t, say so — a forced connection is worse than an honest gap. Post to Discord when done.',
-  },
-};
+import { buildCouncilBriefs } from '@/lib/meeting-briefs';
+import { NexusCore } from '@/components/eyes/NexusCore';
+import { useAgentStore } from '@/hooks/useAgentState';
 
 export default function Home() {
+  const eyeState = useAgentStore((s) => s.eyeState);
+  const corePulse = useAgentStore((s) => s.corePulse);
+  const summonBuilder = useAgentStore((s) => s.summonBuilder);
+
   const [paneCount, setPaneCount] = useState<1 | 2 | 3>(1);
   const [meetingMode, setMeetingMode] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
@@ -43,17 +29,21 @@ export default function Home() {
   const [schedulerOpen, setSchedulerOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
 
-  // ⌘K / Ctrl+K global shortcut
+  // ⌘K command palette · ⌘B summon Grok Build
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setCmdOpen((v) => !v);
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+        e.preventDefault();
+        summonBuilder();
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [summonBuilder]);
 
   const [artifactState, setArtifactState] = useState<{
     artifacts: Artifact[];
@@ -111,6 +101,8 @@ export default function Home() {
         onToggleFocus={() => setFocusMode((v) => !v)}
         onOpenScheduler={() => setSchedulerOpen(true)}
         onOpenHistory={() => setHistoryOpen(true)}
+        paneCount={meetingMode ? 1 : paneCount}
+        onSetPaneCount={handleSetPaneCount}
       />
 
       <AnimatePresence>
@@ -125,20 +117,12 @@ export default function Home() {
         {/* Council Chamber — fixed full-screen overlay when meeting mode active */}
         <AnimatePresence>
           {meetingMode && (
-            <CouncilHub
-              briefs={[
-                { model: 'claude-haiku', brief: MEETING_BRIEF_PANE1 },
-                { model: MEETING_BRIEFS[2].model, brief: MEETING_BRIEFS[2].brief },
-                { model: MEETING_BRIEFS[3].model, brief: MEETING_BRIEFS[3].brief },
-                { model: MEETING_BRIEFS[4].model, brief: MEETING_BRIEFS[4].brief },
-              ]}
-              onClose={endMeeting}
-            />
+            <CouncilHub briefs={buildCouncilBriefs()} onClose={endMeeting} />
           )}
         </AnimatePresence>
 
         {/* Normal layout — always mounted, CouncilHub overlays on top */}
-        <ConversationPanel onOpenArtifact={openArtifact} />
+        <ConversationPanel onOpenArtifact={openArtifact} focusMode={focusMode} />
 
         <AnimatePresence mode="wait">
           {paneCount === 1 && (
@@ -206,6 +190,21 @@ export default function Home() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* Focus mode — agent presence stays visible */}
+      <AnimatePresence>
+        {focusMode && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            className="fixed bottom-5 left-5 z-20 pointer-events-none"
+            style={{ filter: 'drop-shadow(0 0 24px rgba(103,246,255,0.2))' }}
+          >
+            <NexusCore eyeState={eyeState} pulse={corePulse} size={80} builderMode />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

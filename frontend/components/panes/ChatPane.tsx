@@ -12,6 +12,7 @@ import { ArgusMessage } from '@/components/conversation/ArgusMessage';
 import { ToolCallBlock } from '@/components/conversation/ToolCallBlock';
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
 import { PaneModelSelector } from './PaneModelSelector';
+import { StarfieldBackground } from '@/components/shared/StarfieldBackground';
 
 const EYE: Record<EyeState, string> = {
   watching: '◉', thinking: '◎', executing: '⊙', complete: '✦',
@@ -326,10 +327,11 @@ export function ChatPane({ paneIndex, initialModel = 'grok-build', onClose, open
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex flex-col flex-1 overflow-hidden"
+              className="flex flex-col flex-1 overflow-hidden relative"
             >
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+              <StarfieldBackground eyeState={eyeState} motionScale={0.85} />
+
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 relative z-10">
                 {messages.map((msg) => {
                   if (msg.role === 'user') return <UserMessage key={msg.id} message={msg} />;
                   return (

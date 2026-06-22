@@ -20,6 +20,8 @@ interface Props {
   onToggleFocus: () => void;
   onOpenScheduler: () => void;
   onOpenHistory: () => void;
+  paneCount: 1 | 2 | 3;
+  onSetPaneCount: (n: 1 | 2 | 3) => void;
 }
 
 const MODEL_COMMANDS: { model: ModelId; label: string }[] = [
@@ -30,14 +32,28 @@ const MODEL_COMMANDS: { model: ModelId; label: string }[] = [
   { model: 'gemini-flash', label: 'Gemini Flash — Allied' },
 ];
 
-export function CommandPalette({ open, onClose, onStartMeeting, onToggleFocus, onOpenScheduler, onOpenHistory }: Props) {
+export function CommandPalette({
+  open, onClose, onStartMeeting, onToggleFocus, onOpenScheduler, onOpenHistory,
+  paneCount, onSetPaneCount,
+}: Props) {
   const [query, setQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
   const switchModel = useAgentStore((s) => s.switchModel);
+  const summonBuilder = useAgentStore((s) => s.summonBuilder);
   const newConversation = useAgentStore((s) => s.newConversation);
+  const setMindView = useAgentStore((s) => s.setMindView);
+  const expandAllPanels = useAgentStore((s) => s.expandAllPanels);
 
   const commands: Command[] = [
+    {
+      id: 'summon-builder',
+      label: 'Summon Grok Build — Primary Coder',
+      group: 'Builder',
+      hint: '⌘B · full tools · 12 rounds',
+      action: () => { summonBuilder(); onClose(); },
+    },
     ...MODEL_COMMANDS.map((m) => ({
       id: 'model-' + m.model,
       label: 'Switch to ' + m.label,
@@ -48,28 +64,77 @@ export function CommandPalette({ open, onClose, onStartMeeting, onToggleFocus, o
       id: 'meeting',
       label: 'Open Council Chamber',
       group: 'System',
-      hint: 'Start monthly multi-agent meeting',
+      hint: 'Four-model monthly meeting',
       action: () => { onStartMeeting(); onClose(); },
     },
     {
       id: 'new-thread',
       label: 'New Conversation',
       group: 'System',
-      hint: 'Start a fresh thread',
+      hint: 'Fresh thread on main connection',
       action: () => { newConversation(); onClose(); },
     },
     {
       id: 'focus',
       label: 'Toggle Focus Mode',
       group: 'View',
-      hint: 'Hide side panels',
+      hint: 'Collapse side panels · slow starfield',
       action: () => { onToggleFocus(); onClose(); },
+    },
+    {
+      id: 'expand-panels',
+      label: 'Expand Eyes + Mind Panels',
+      group: 'View',
+      action: () => { expandAllPanels(); onClose(); },
+    },
+    {
+      id: 'pane-1',
+      label: 'Single Pane Layout',
+      group: 'Layout',
+      action: () => { onSetPaneCount(1); onClose(); },
+    },
+    {
+      id: 'pane-2',
+      label: 'Dual Pane Layout',
+      group: 'Layout',
+      hint: 'Main + allied model',
+      action: () => { onSetPaneCount(2); onClose(); },
+    },
+    {
+      id: 'pane-3',
+      label: 'Triple Pane Layout',
+      group: 'Layout',
+      hint: 'Main + Grok + Gemini',
+      action: () => { onSetPaneCount(3); onClose(); },
+    },
+    {
+      id: 'mind-mind',
+      label: 'Mind Panel → Memory',
+      group: 'Mind',
+      action: () => { setMindView('mind'); onClose(); },
+    },
+    {
+      id: 'mind-graph',
+      label: 'Mind Panel → Knowledge Graph',
+      group: 'Mind',
+      action: () => { setMindView('field'); onClose(); },
+    },
+    {
+      id: 'mind-flow',
+      label: 'Mind Panel → Execution Flow',
+      group: 'Mind',
+      action: () => { setMindView('flow'); onClose(); },
+    },
+    {
+      id: 'mind-sched',
+      label: 'Mind Panel → Schedule',
+      group: 'Mind',
+      action: () => { setMindView('schedule'); onClose(); },
     },
     {
       id: 'scheduler',
       label: 'Open Task Scheduler',
       group: 'View',
-      hint: 'Deploy scheduled work',
       action: () => { onOpenScheduler(); onClose(); },
     },
     {
@@ -83,7 +148,8 @@ export function CommandPalette({ open, onClose, onStartMeeting, onToggleFocus, o
   const filtered = query.trim()
     ? commands.filter((c) =>
         c.label.toLowerCase().includes(query.toLowerCase()) ||
-        c.group.toLowerCase().includes(query.toLowerCase())
+        c.group.toLowerCase().includes(query.toLowerCase()) ||
+        (c.hint?.toLowerCase().includes(query.toLowerCase()) ?? false),
       )
     : commands;
 
@@ -126,13 +192,18 @@ export function CommandPalette({ open, onClose, onStartMeeting, onToggleFocus, o
             <input
               ref={inputRef}
               className="cmdk-input"
-              placeholder="Type a command…"
+              placeholder="Command the chamber…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKey}
             />
 
-            <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+            <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+              {!query.trim() && (
+                <div className="cmdk-hint" style={{ paddingTop: 8 }}>
+                  Layout: pane {paneCount} · ⌘K anytime
+                </div>
+              )}
               {filtered.length === 0 && (
                 <div className="cmdk-hint">No commands match</div>
               )}
@@ -143,7 +214,7 @@ export function CommandPalette({ open, onClose, onStartMeeting, onToggleFocus, o
                   onMouseEnter={() => setActiveIdx(i)}
                   onClick={cmd.action}
                 >
-                  <span className="text-[9px] text-[#3a3a48] w-12 flex-shrink-0">{cmd.group}</span>
+                  <span className="text-[9px] text-[#3a3a48] w-14 flex-shrink-0">{cmd.group}</span>
                   <span className="flex-1">{cmd.label}</span>
                   {cmd.hint && <span className="text-[9px] text-[#3a3a48] hidden sm:block">{cmd.hint}</span>}
                 </div>

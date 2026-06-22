@@ -14,8 +14,11 @@ export function ModelSelector() {
   const switchModel = useAgentStore((s) => s.switchModel);
   const cfg = MODEL_CONFIG[activeModel];
 
+  const builderModel = MODELS_IN_ORDER.filter((m) => MODEL_CONFIG[m].isPrimaryCoder);
   const royalModels = MODELS_IN_ORDER.filter((m) => MODEL_CONFIG[m].tier === 'royal');
-  const alliedModels = MODELS_IN_ORDER.filter((m) => MODEL_CONFIG[m].tier === 'allied');
+  const alliedModels = MODELS_IN_ORDER.filter(
+    (m) => MODEL_CONFIG[m].tier === 'allied' && !MODEL_CONFIG[m].isPrimaryCoder,
+  );
 
   function select(id: ModelId) {
     switchModel(id);
@@ -53,6 +56,20 @@ export function ModelSelector() {
               transition={{ duration: 0.15 }}
               className="absolute right-0 top-full mt-1 z-50 w-72 rounded border border-argus-border bg-argus-bg2 shadow-2xl overflow-hidden"
             >
+              {/* Builder — primary coder */}
+              <div className="px-3 pt-2.5 pb-1" style={{ background: 'rgba(74,222,128,0.04)' }}>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span className="text-xs">⚡</span>
+                  <span className="text-[9px] font-mono tracking-widest uppercase" style={{ color: '#4ade80' }}>Builder Station</span>
+                  <span className="text-[8px] font-mono text-argus-textDim ml-auto">12 rounds</span>
+                </div>
+                {builderModel.map((id) => (
+                  <ModelOption key={id} id={id} active={id === activeModel} onSelect={select} showToolToggle />
+                ))}
+              </div>
+
+              <div className="border-t border-argus-border" />
+
               {/* Royal tier */}
               <div className="px-3 pt-2.5 pb-1">
                 <div className="flex items-center gap-1.5 mb-1.5">
@@ -176,7 +193,12 @@ function ModelOption({
           {m.name}
         </span>
         {active && (
-          <span className="text-[9px] font-mono text-argus-amber tracking-widest">ACTIVE</span>
+          <span
+            className="text-[9px] font-mono tracking-widest"
+            style={{ color: m.isPrimaryCoder ? '#4ade80' : undefined }}
+          >
+            {m.isPrimaryCoder ? 'BUILDER' : 'ACTIVE'}
+          </span>
         )}
       </button>
 

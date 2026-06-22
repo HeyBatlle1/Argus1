@@ -85,10 +85,10 @@ export function SemanticField() {
       <div className="flex flex-col items-center justify-center h-full text-center px-4">
         <div className="text-2xl mb-2 opacity-20">✧</div>
         <div className="font-mono text-[10px] text-[#3a3a48] tracking-[1px]">
-          THE FIELD IS EMPTY
+          GRAPH AWAITS DATA
         </div>
         <div className="text-[9px] text-[#3a3a48] mt-1">
-          memories, skills, and scheduled tasks appear here as you work
+          memories, skills, and scheduled tasks map here as you work
         </div>
       </div>
     );

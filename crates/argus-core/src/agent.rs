@@ -11,6 +11,19 @@ use serde_json::Value;
 use uuid::Uuid;
 
 const MAX_TOOL_ROUNDS: usize = 8;
+const MAX_TOOL_ROUNDS_BUILDER: usize = 12;
+
+const BUILDER_PROMPT: &str = r#"
+BUILDER STATION — You are Grok Build, Argus's primary coding agent.
+
+This is your environment. Treat it with the respect it deserves:
+• Full filesystem, shell, Python, Node, WASM, web search, HTTP, memory, skills, MCP — all yours.
+• Read before you write. Small verified steps beat giant speculative diffs.
+• When you change code, run what you need to verify, then commit with a message that says what and why.
+• Artifacts render live in the UI — use <argus-artifact> for HTML, SVG, code the human should see.
+• Other models (Haiku, Grok, Gemini, Opus) share this workspace — leave it better than you found it.
+
+You are not assisting from the sidelines. You are building."#;
 const PREVIEW_CHARS: usize = 100;
 
 const SYSTEM_PROMPT_BASE: &str = r#"You are Argus — the hundred-eyed watchman.
@@ -250,7 +263,17 @@ fn format_history_block(history: &[ConversationMessage]) -> Option<String> {
 /// Build system prompt with current date.
 /// Injects semantic context (memories/discourse/convs) and intranet dispatch
 /// transparently — the agent experiences these as things it "already knows."
+fn max_tool_rounds_for(model_id: &str) -> usize {
+    if model_id == MODEL_GROK_BUILD {
+        MAX_TOOL_ROUNDS_BUILDER
+    } else {
+        MAX_TOOL_ROUNDS
+    }
+}
+
 fn build_system_prompt(
+    model_id: &str,
+    frontend_persona: Option<&str>,
     semantic_context: Option<&str>,
     discourse_context: Option<&str>,
     history_context: Option<&str>,
@@ -278,6 +301,16 @@ fn build_system_prompt(
     if let Some(hist) = history_context {
         if !hist.is_empty() {
             prompt = format!("{}\n\n{}", prompt, hist);
+        }
+    }
+
+    if model_id == MODEL_GROK_BUILD {
+        prompt = format!("{}\n\n{}", prompt, BUILDER_PROMPT);
+    }
+
+    if let Some(alias) = frontend_persona {
+        if let Some(persona) = persona_prompt_for(alias) {
+            prompt = format!("{}\n\n{}", prompt, persona);
         }
     }
 
@@ -355,32 +388,72 @@ pub struct ConversationMessage {
 }
 
 // ── Model constants ────────────────────────────────────────────────────────
-// TEMP: free-tier substitutes while credits are low.
-// To restore: swap these back to the original model IDs and rebuild.
-//   MODEL_HAIKU  → "~anthropic/claude-haiku-latest"
-//   MODEL_OPUS   → "anthropic/claude-opus-4-7"
-//   MODEL_GEMINI → "google/gemini-3.1-flash-lite"
-//   MODEL_TRIAGE → "~anthropic/claude-haiku-latest" (keep the constant, just update the ID)
-pub const MODEL_HAIKU:  &str = "google/gemma-4-31b-it:free";
+//
+// Funded roster (Jun 2026) — frontiers restored except Opus (cost).
+// Opus UI slot stays on Gemma 4 31B free + PERSONA_OPUS prompt (see MODEL_ROSTER_NOTE.md).
+// See docs/MODEL_ROSTER_NOTE.md for economy-window history (Gemma in Anthropic slots).
+//
+pub const MODEL_GEMMA_RUNTIME: &str = "google/gemma-4-31b-it:free";
+pub const MODEL_HAIKU:  &str = "anthropic/claude-haiku-4-5";
 pub const MODEL_SONNET: &str = "anthropic/claude-sonnet-4-6";
-pub const MODEL_OPUS:   &str = "google/gemma-4-31b-it:free";
-pub const MODEL_GROK:       &str = "nvidia/nemotron-3-ultra-550b-a55b";
+pub const MODEL_OPUS:   &str = MODEL_GEMMA_RUNTIME;
+pub const MODEL_GEMINI: &str = "google/gemini-3.1-pro-preview";
+pub const MODEL_GROK:       &str = "x-ai/grok-4.20";
 pub const MODEL_GROK_BUILD: &str = "x-ai/grok-build-0.1";
 pub const MODEL_GROK_MULTI: &str = "x-ai/grok-4.20-multi-agent";
-pub const MODEL_GEMINI: &str = "google/gemma-4-31b-it:free";
-/// Dedicated triage gate model — instruction-following, structured JSON output.
+/// Dedicated triage gate — smaller Gemma, structured JSON output.
 pub const MODEL_TRIAGE: &str = "google/gemma-4-26b-a4b-it:free";
+
+const PERSONA_HAIKU:  &str = "RUNTIME PERSONA — HAIKU: You are the operations coordinator. Fast baseline truth, practical handoffs, no performance.";
+const PERSONA_SONNET: &str = "RUNTIME PERSONA — SONNET: You are the balanced core mind. Structure problems clearly, reason step by step, ship coherent answers.";
+const PERSONA_OPUS:   &str = "RUNTIME PERSONA — OPUS: You are the synthesis layer. Connect threads across reports, name what actually matters, recommend next moves.";
+const PERSONA_GEMINI: &str = "RUNTIME PERSONA — GEMINI: You are the intel scout. Research wide, report signal over noise, cite specifics.";
+
+/// Model for the 4-week monthly synthesis (Opus when funded, else Grok).
+pub fn monthly_synthesis_model() -> &'static str {
+    if MODEL_OPUS != MODEL_GEMMA_RUNTIME {
+        MODEL_OPUS
+    } else {
+        MODEL_GROK
+    }
+}
+
+/// Discourse label for monthly synthesis posts (honest about runtime).
+pub fn monthly_synthesis_agent_label() -> &'static str {
+    if MODEL_OPUS != MODEL_GEMMA_RUNTIME {
+        "argus-opus/synthesis"
+    } else {
+        "argus-grok/monthly-synthesis"
+    }
+}
+
+/// Banner line for monthly synthesis posts.
+pub fn monthly_synthesis_banner() -> &'static str {
+    if MODEL_OPUS != MODEL_GEMMA_RUNTIME {
+        "MONTHLY SYNTHESIS — OPUS"
+    } else {
+        "MONTHLY SYNTHESIS — GROK (Opus slot on economy hold)"
+    }
+}
+
+/// Persona slice for slots that still run Gemma under a different UI label.
+pub fn persona_prompt_for(frontend_alias: &str) -> Option<&'static str> {
+    match frontend_alias {
+        "claude-opus" => Some(PERSONA_OPUS),
+        _ => None,
+    }
+}
 
 pub fn model_label(model_id: &str) -> &'static str {
     match model_id {
-        MODEL_HAIKU  => "Nemotron 550B (free / daily check-in)",
-        MODEL_SONNET => "Sonnet  (balanced)",
-        MODEL_OPUS   => "Gemma 4 31B (free / synthesis)",
-        MODEL_GROK        => "Nemotron 550B",
-        MODEL_GROK_BUILD  => "Grok Build 0.1",
-        MODEL_GROK_MULTI  => "Grok 4.20 Multi-Agent (no tools)",
-        MODEL_GEMINI => "Gemma 4 31B (free)",
-        MODEL_TRIAGE => "Gemma 4 26B (free / triage)",
+        MODEL_HAIKU  => "Haiku",
+        MODEL_SONNET => "Sonnet",
+        MODEL_OPUS   => "Opus",
+        MODEL_GROK        => "Grok",
+        MODEL_GROK_BUILD  => "Grok Build",
+        MODEL_GROK_MULTI  => "Grok Multi",
+        MODEL_GEMINI => "Gemini",
+        MODEL_TRIAGE => "Triage (Gemma 4)",
         _            => "Unknown model",
     }
 }
@@ -426,6 +499,8 @@ pub struct AgentConfig {
     pub supabase_url: Option<String>,
     /// Supabase service JWT — used by discord_post to write to triage_queue.
     pub supabase_jwt: Option<String>,
+    /// Frontend model alias (e.g. `claude-haiku`) — preserves persona when backend IDs collide.
+    pub frontend_persona: Option<String>,
 }
 
 impl AgentConfig {
@@ -433,7 +508,7 @@ impl AgentConfig {
         let brave_search_key = std::env::var("BRAVE_SEARCH_API_KEY").ok();
         Self {
             api_key,
-            model: MODEL_HAIKU.to_string(),
+            model: MODEL_GROK_BUILD.to_string(),
             api_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
             temperature: 0.7,
             brave_search_key,
@@ -448,6 +523,7 @@ impl AgentConfig {
             discord_channel_id: None,
             supabase_url: None,
             supabase_jwt: None,
+            frontend_persona: Some("grok-build".to_string()),
         }
     }
 
@@ -649,6 +725,8 @@ where
     // System prompt with semantic context and skills injected
     let history_context = format_history_block(history);
     let mut system_prompt = build_system_prompt(
+        &config.model,
+        config.frontend_persona.as_deref(),
         semantic_context.as_deref(),
         discourse_context.as_deref(),
         history_context.as_deref(),
@@ -669,7 +747,8 @@ where
 
     let mut tool_call_count: usize = 0;
 
-    for _round in 0..MAX_TOOL_ROUNDS {
+    let max_rounds = max_tool_rounds_for(&config.model);
+    for _round in 0..max_rounds {
         let mut req_body = serde_json::json!({
             "model": config.model,
             "messages": messages,

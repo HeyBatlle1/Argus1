@@ -12,6 +12,7 @@ import { ArgusConnection } from '@/lib/connection';
 import { parseArtifacts } from '@/lib/artifacts';
 import { DEFAULT_TOOLS, WS_URL } from '@/lib/constants';
 import { getModelTier } from '@/lib/models';
+import { PRIMARY_CODER } from '@/lib/builder';
 import { RealConnection } from './useWebSocket';
 
 // ─── Dev-mode seed data (only loaded when no WS_URL is set) ───────────────
@@ -121,11 +122,21 @@ interface AgentStore {
   // NexusCore pulse intensity (0-14, driven by tool activity)
   corePulse: number;
 
+  // UI chrome (command palette + layout)
+  mindView: 'mind' | 'field' | 'flow' | 'schedule';
+  eyesCollapsed: boolean;
+  mindCollapsed: boolean;
+
   // Internal
   _ws: ArgusConnection | null;
 
   // Actions
   sendMessage: (content: string) => void;
+  setMindView: (view: 'mind' | 'field' | 'flow' | 'schedule') => void;
+  setEyesCollapsed: (collapsed: boolean) => void;
+  setMindCollapsed: (collapsed: boolean) => void;
+  expandAllPanels: () => void;
+  summonBuilder: () => void;
   switchModel: (model: ModelId) => void;
   setEyeState: (state: EyeState) => void;
   setModelTools: (model: string, enabled: boolean) => void;
@@ -146,7 +157,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   // Agent state — prod starts watching, dev same
   eyeState: 'watching',
-  activeModel: 'claude-haiku',
+  activeModel: 'grok-build',
   accessTier: 'royal',
   isStreaming: false,
 
@@ -183,6 +194,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
   scheduledTasks: [],
   corePulse: 4,
+
+  mindView: 'mind',
+  eyesCollapsed: false,
+  mindCollapsed: false,
 
   _ws: null,
 
@@ -438,5 +453,17 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   loadConversation: (id: string) => {
     get()._ws?.send({ type: 'load_conversation', id });
+  },
+
+  setMindView: (view) => set({ mindView: view, mindCollapsed: false }),
+  setEyesCollapsed: (collapsed) => set({ eyesCollapsed: collapsed }),
+  setMindCollapsed: (collapsed) => set({ mindCollapsed: collapsed }),
+  expandAllPanels: () => set({ eyesCollapsed: false, mindCollapsed: false }),
+
+  summonBuilder: () => {
+    const store = get();
+    store.setModelTools(PRIMARY_CODER, true);
+    store.switchModel(PRIMARY_CODER);
+    set({ eyesCollapsed: false, mindCollapsed: false });
   },
 }));

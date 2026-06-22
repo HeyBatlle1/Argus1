@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::CorsLayer;
 
-use argus_core::{AgentConfig, AgentEvent, ConversationMessage, EmbeddingClient, McpClient, MemoryBackend, ShellPolicy, MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS, MODEL_GROK, MODEL_GROK_BUILD, MODEL_GROK_MULTI};
+use argus_core::{AgentConfig, AgentEvent, ConversationMessage, EmbeddingClient, McpClient, MemoryBackend, ShellPolicy, MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS, MODEL_GROK, MODEL_GROK_BUILD, MODEL_GROK_MULTI, MODEL_GEMINI};
 use argus_core::shell::PermissionPrompter;
 use argus_memory::sqlite::{ConversationMeta, SqliteMemory};
 
@@ -151,6 +151,8 @@ enum ServerMessage {
 
 struct ConnectionState {
     config: AgentConfig,
+    /// UI model alias — survives when Haiku/Sonnet/Opus/Gemini share one Gemma runtime.
+    frontend_model: String,
     history: Vec<ConversationMessage>,
     client: reqwest::Client,
     memory: SqliteMemory,
@@ -161,6 +163,8 @@ struct ConnectionState {
 }
 
 impl ConnectionState {
+    /// `surface` — conversation namespace: `web` (default), `council`, etc.
+    /// `initial_model` — frontend model alias to select on connect (e.g. `grok-build`).
     fn new(
         api_key: String,
         brave_key: Option<String>,
@@ -170,6 +174,8 @@ impl ConnectionState {
         audit: Option<std::sync::Arc<argus_audit::AuditChain>>,
         discord_bot_token: Option<String>,
         discord_channel_id: Option<u64>,
+        surface: &str,
+        initial_model: Option<&str>,
     ) -> anyhow::Result<Self> {
         let mut config = AgentConfig::new(api_key);
         if let Some(k) = brave_key {
@@ -185,26 +191,39 @@ impl ConnectionState {
         let memory = SqliteMemory::open_default()
             .map_err(|e| anyhow::anyhow!("Memory init failed: {}", e))?;
 
-        // Restore the most recent web conversation, or start fresh.
-        let (conversation_id, conversation_title, history) =
+        // Web restores the latest web thread; council and other surfaces always start fresh.
+        let (conversation_id, conversation_title, history, restored_frontend) = if surface == "web" {
             match memory.latest_conversation() {
                 Ok(Some(meta)) if meta.surface == "web" => {
                     let hist = memory.load_history_str(&meta.id).unwrap_or_default();
-                    (meta.id, meta.title, hist)
+                    let fm = meta.model.unwrap_or_else(|| "grok-build".to_string());
+                    (meta.id, meta.title, hist, fm)
                 }
                 _ => {
                     let id = uuid::Uuid::new_v4().to_string();
                     let title = "New Conversation".to_string();
-                    let _ = memory.upsert_conversation(&id, &title, "web", None, 0);
-                    (id, title, Vec::new())
+                    let _ = memory.upsert_conversation(&id, &title, "web", initial_model, 0);
+                    (id, title, Vec::new(), "grok-build".to_string())
                 }
+            }
+        } else {
+            let id = uuid::Uuid::new_v4().to_string();
+            let title = if surface == "council" {
+                format!("Council — {}", chrono::Utc::now().format("%b %d %H:%M UTC"))
+            } else {
+                format!("{} Session", surface)
             };
+            let _ = memory.upsert_conversation(&id, &title, surface, initial_model, 0);
+            (id, title, Vec::new(), initial_model.unwrap_or("grok-build").to_string())
+        };
 
         let mut mcp = McpClient::new();
         let _ = mcp.connect_all();
 
-        Ok(Self {
+        let default_frontend = initial_model.unwrap_or(restored_frontend.as_str());
+        let mut state = Self {
             config,
+            frontend_model: default_frontend.to_string(),
             history,
             client: reqwest::Client::new(),
             memory,
@@ -212,10 +231,14 @@ impl ConnectionState {
             shell_policy: ShellPolicy::permissive(),
             conversation_id,
             conversation_title,
-        })
+        };
+
+        state.apply_model_switch(default_frontend);
+
+        Ok(state)
     }
 
-    /// Map frontend model ID alias → OpenRouter model ID
+    /// Map frontend model ID alias → OpenRouter model ID + persona
     fn apply_model_switch(&mut self, frontend_id: &str) {
         let openrouter_id = match frontend_id {
             "claude-haiku"  => MODEL_HAIKU,
@@ -224,24 +247,16 @@ impl ConnectionState {
             "grok"          => MODEL_GROK,
             "grok-build"    => MODEL_GROK_BUILD,
             "grok-multi"    => MODEL_GROK_MULTI,
-            "gemini-flash"  => "google/gemini-3.1-flash-lite",
-            other           => other, // pass through if already a full ID
+            "gemini-flash"  => MODEL_GEMINI,
+            other           => other,
         };
+        self.frontend_model = frontend_id.to_string();
         self.config.model = openrouter_id.to_string();
+        self.config.frontend_persona = Some(frontend_id.to_string());
     }
 
-    /// Map OpenRouter model ID → frontend alias
     fn current_frontend_model(&self) -> String {
-        match self.config.model.as_str() {
-            MODEL_HAIKU  => "claude-haiku".to_string(),
-            MODEL_SONNET => "claude-sonnet".to_string(),
-            MODEL_OPUS   => "claude-opus".to_string(),
-            MODEL_GROK       => "grok".to_string(),
-            MODEL_GROK_BUILD  => "grok-build".to_string(),
-            MODEL_GROK_MULTI => "grok-multi".to_string(),
-            "google/gemini-3.1-flash-lite" => "gemini-flash".to_string(),
-            other => other.to_string(),
-        }
+        self.frontend_model.clone()
     }
 }
 
@@ -505,12 +520,23 @@ async fn ws_handler(
         }
     }
 
-    ws.on_upgrade(move |socket| handle_socket(socket, state)).into_response()
+    let surface = params
+        .get("surface")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "web".to_string());
+    let model = params.get("model").cloned();
+
+    ws.on_upgrade(move |socket| handle_socket(socket, state, surface, model)).into_response()
 }
 
 // ─── WebSocket connection handler ──────────────────────────────────────────
 
-async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    surface: String,
+    initial_model: Option<String>,
+) {
     let (ws_tx, ws_rx) = socket.split();
     let ws_tx = Arc::new(Mutex::new(ws_tx));
 
@@ -542,6 +568,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         state.audit.clone(),
         state.discord_bot_token.clone(),
         state.discord_channel_id,
+        &surface,
+        initial_model.as_deref(),
     ) {
         Ok(c) => c,
         Err(e) => {

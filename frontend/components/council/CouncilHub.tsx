@@ -5,8 +5,9 @@ import {
   useRef, useState,
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send } from 'lucide-react';
+import { X, Send, BookMarked } from 'lucide-react';
 import { RealConnection } from '@/hooks/useWebSocket';
+import { useAgentStore } from '@/hooks/useAgentState';
 import { ServerMessage, ModelId, EyeState } from '@/lib/types';
 import { WS_URL } from '@/lib/constants';
 import { parseArtifacts } from '@/lib/artifacts';
@@ -100,7 +101,10 @@ export const CouncilOrb = forwardRef<OrbHandle, OrbProps>(function CouncilOrb(
   // ── Connect on mount ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!WS_URL) return;
-    const conn = new RealConnection(WS_URL, handleMsg, setConnected);
+    const conn = new RealConnection(WS_URL, handleMsg, setConnected, {
+      model,
+      surface: 'council',
+    });
     wsRef.current = conn;
     return () => { conn.close(); wsRef.current = null; };
   }, [handleMsg]);
@@ -282,10 +286,12 @@ interface CouncilHubProps {
 }
 
 export function CouncilHub({ briefs, onClose }: CouncilHubProps) {
+  const sendMessage = useAgentStore((s) => s.sendMessage);
   const [inputValue,     setInputValue]     = useState('');
   const [particles,      setParticles]      = useState<Particle[]>([]);
   const [synthesisCards, setSynthesisCards] = useState<string[]>([]);
   const [synopsis,       setSynopsis]       = useState('');
+  const [synthesisSaved, setSynthesisSaved] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef     = useRef<HTMLTextAreaElement>(null);
@@ -351,6 +357,19 @@ export function CouncilHub({ briefs, onClose }: CouncilHubProps) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); broadcast(); }
   }
 
+  function commitSynthesisToMemory() {
+    const body = synopsis || synthesisCards.join('\n\n');
+    if (!body.trim()) return;
+    const date = new Date().toISOString().slice(0, 10);
+    sendMessage(
+      `[COUNCIL SYNTHESIS — commit to memory]\n\n` +
+      `Call remember once: type "learning", importance 8, content summarizing this council synthesis. ` +
+      `Subject line: "[COUNCIL ${date}] Monthly synthesis".\n\n${body}`,
+    );
+    setSynthesisSaved(true);
+    setTimeout(() => setSynthesisSaved(false), 4000);
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -379,21 +398,29 @@ export function CouncilHub({ briefs, onClose }: CouncilHubProps) {
           </span>
         </div>
 
-        <button
-          onClick={onClose}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded font-mono text-[9px] tracking-widest uppercase transition-all"
-          style={{ border: '1px solid #2a2a3a', color: '#5a5a7a' }}
-          onMouseEnter={e => {
-            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(201,168,76,0.4)';
-            (e.currentTarget as HTMLButtonElement).style.color = '#c9a84c';
-          }}
-          onMouseLeave={e => {
-            (e.currentTarget as HTMLButtonElement).style.borderColor = '#2a2a3a';
-            (e.currentTarget as HTMLButtonElement).style.color = '#5a5a7a';
-          }}
-        >
-          <X size={10} /> Dismiss
-        </button>
+        <div className="flex items-center gap-2">
+          {(synopsis || synthesisCards.length > 0) && (
+            <button
+              onClick={commitSynthesisToMemory}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded font-mono text-[9px] tracking-widest uppercase transition-all panel-action-btn"
+              style={{
+                border: '1px solid rgba(192,132,252,0.4)',
+                color: synthesisSaved ? '#39d353' : '#c084fc',
+                background: synthesisSaved ? 'rgba(57,211,83,0.08)' : 'rgba(192,132,252,0.06)',
+              }}
+            >
+              <BookMarked size={10} />
+              {synthesisSaved ? 'COMMITTED' : 'SAVE TO MEMORY'}
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded font-mono text-[9px] tracking-widest uppercase panel-action-btn"
+            style={{ border: '1px solid #2a2a3a', color: '#5a5a7a' }}
+          >
+            <X size={10} /> Dismiss
+          </button>
+        </div>
       </div>
 
       {/* Body */}
