@@ -5,19 +5,19 @@
 //! The check-in loop wakes on `interval_minutes`, respects quiet hours, and
 //! performs two distinct roles:
 //!
+//! **Economy mode** (`ARGUS_ECONOMY_MODE=1`, default ON) — two LLM reports per day:
+//!   - **08:00 local — Haiku** morning pulse (system health + intranet context)
+//!   - **20:00 local — Grok** end-of-day wrap (what mattered today)
+//!   No daily exploration, weekly sweeps, or monthly council until economy mode is off.
+//!   System alerts still fire without an LLM call.
+//!
 //! **Alert mode** — fires immediately when thresholds are exceeded:
 //!   - Disk usage > 80 %
 //!   - Memory usage > 90 %
 //!   - Any container unhealthy or exited unexpectedly
 //!
-//! **Daily heartbeat** — fires once per calendar day (first tick after midnight).
-//!   Previously this sent only a system-status summary.  After the May 2026
-//!   upgrade it also runs `run_agent_checkin`, which calls `run_agent_turn` so
-//!   the agent can make a genuine observation rather than just reporting metrics.
-//!
-//! **Weekly tech sweep** — replaces the daily heartbeat on Sunday midnight.
-//!   The agent searches for Rust crate updates, AI/agent developments, and open
-//!   codebase items, then posts a tagged `[WEEKLY SWEEP]` finding to Discord.
+//! **Full mode** (`ARGUS_ECONOMY_MODE=0`) — legacy behavior:
+//!   Daily heartbeat + two-model exploration + weekly sweep + monthly synthesis.
 //!
 //! ## Telegram message format (after upgrade)
 //!
@@ -52,6 +52,43 @@ const TELEGRAM_API: &str = "https://api.telegram.org";
 const DISK_ALERT_PCT: u8 = 80;
 const MEM_ALERT_PCT: u8 = 90;
 
+/// Morning report — 12 hours before end-of-day Grok report.
+const ECONOMY_HAIKU_HOUR: u32 = 8;
+/// End-of-day synthesis.
+const ECONOMY_GROK_HOUR: u32 = 20;
+
+const ECONOMY_BLOCKED_TOOLS: &[&str] = &[
+    "shell",
+    "web_search",
+    "http_request",
+    "run_python",
+    "run_node",
+    "write_file",
+    "list_directory",
+    "read_file",
+];
+
+fn economy_mode() -> bool {
+    match std::env::var("ARGUS_ECONOMY_MODE") {
+        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true"),
+        Err(_) => true, // default ON — protect spend until explicitly disabled
+    }
+}
+
+fn report_hour_from_env(key: &str, default: u32) -> u32 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&h| h < 24)
+        .unwrap_or(default)
+}
+
+#[derive(Clone, Copy)]
+enum EconomyReport {
+    MorningHaiku,
+    EndOfDayGrok,
+}
+
 /// Entry point — spawns the check-in loop as a background task.
 ///
 /// `agent_config` gives the loop full agent capabilities (API key, model,
@@ -77,8 +114,19 @@ async fn run_checkin_loop(
     let client = Client::new();
     let mut last_daily: Option<NaiveDate> = None;
     let mut last_exploration: Option<NaiveDate> = None;
+    let mut last_haiku_report: Option<NaiveDate> = None;
+    let mut last_grok_report: Option<NaiveDate> = None;
     // Tracks the 4-week cycle number of the last Opus synthesis run.
     let mut last_synthesis_cycle: Option<u32> = None;
+
+    let economy = economy_mode();
+    if economy {
+        eprintln!(
+            "[checkin] Economy mode ON — Haiku @{}:00, Grok @{}:00 local; exploration/sweeps OFF",
+            report_hour_from_env("ARGUS_REPORT_HAIKU_HOUR", ECONOMY_HAIKU_HOUR),
+            report_hour_from_env("ARGUS_REPORT_GROK_HOUR", ECONOMY_GROK_HOUR),
+        );
+    }
 
     loop {
         let checkin_cfg = supabase.read_checkin_config().await;
@@ -92,110 +140,337 @@ async fn run_checkin_loop(
                 || health.mem_pct > MEM_ALERT_PCT
                 || health.has_unhealthy_container;
 
-            let needs_daily = last_daily.map_or(true, |d| d < today);
-            let needs_exploration = last_exploration.map_or(true, |d| d < today);
-
-            // Weekly research sweep: Sunday midnight, rotates model each week.
-            let is_weekly_sweep = needs_daily
-                && now.weekday() == chrono::Weekday::Sun
-                && now.hour() == 0;
-
-            // Monthly Opus synthesis: fires at the start of each new 4-week cycle
-            // (when cycle_week == 0, i.e. weeks 1, 5, 9, 13… of the year).
-            let week_num = now.iso_week().week();
-            let current_cycle = (week_num - 1) / 4;
-            let is_new_cycle = is_weekly_sweep
-                && (week_num - 1) % 4 == 0
-                && last_synthesis_cycle.map_or(true, |c| c < current_cycle);
-
-            // ── Monthly synthesis (Opus when funded; Grok stand-in while Opus slot is Gemma) ──
-            if is_new_cycle {
-                eprintln!(
-                    "[checkin] New 4-week cycle {} — running monthly synthesis ({})",
-                    current_cycle,
-                    monthly_synthesis_model()
-                );
-                if let Some(synthesis) = run_monthly_synthesis(&supabase, &agent_config).await {
-                    run_meeting_of_minds(&supabase, &agent_config, &synthesis).await;
-                }
-                last_synthesis_cycle = Some(current_cycle);
-            }
-
-            // ── Weekly skill gardening — prune dead skills, flag weak ones ──
-            if is_weekly_sweep {
-                if let Some(ref sc) = agent_config.skills {
-                    let gardener = argus_core::skills::SkillGardener {
-                        skills: sc.clone(),
-                        discord_bot_token: agent_config.discord_bot_token.clone(),
-                        discord_channel_id: agent_config.discord_channel_id,
-                        http: reqwest::Client::new(),
-                    };
-                    tokio::spawn(async move { gardener.run_maintenance().await });
-                }
-            }
-
-            if needs_alert || needs_daily {
-                let schedule_summary = read_schedule_summary(&supabase).await;
-
-                let agent_finding: Option<String> = if needs_daily && !needs_alert {
-                    run_agent_checkin(&supabase, &agent_config, &health, is_weekly_sweep).await
-                } else {
-                    None
-                };
-
-                if let Some(ref finding) = agent_finding {
-                    post_finding_to_discourse(&supabase, &agent_config, finding, is_weekly_sweep).await;
+            if economy {
+                // ── Economy: metrics-only alerts (no LLM) ─────────────────────
+                if needs_alert {
+                    let schedule_summary = read_schedule_summary(&supabase).await;
+                    let message = format_checkin_message(
+                        &health,
+                        &schedule_summary,
+                        true,
+                        false,
+                        None,
+                    );
+                    if let Err(e) =
+                        send_telegram_message(&client, &bot_token, chat_id, &message).await
+                    {
+                        eprintln!("[checkin] Failed to send alert: {}", e);
+                    }
                 }
 
-                let message = format_checkin_message(
-                    &health,
-                    &schedule_summary,
-                    needs_alert,
-                    needs_daily,
-                    agent_finding.as_deref(),
-                );
+                let haiku_hour =
+                    report_hour_from_env("ARGUS_REPORT_HAIKU_HOUR", ECONOMY_HAIKU_HOUR);
+                let grok_hour = report_hour_from_env("ARGUS_REPORT_GROK_HOUR", ECONOMY_GROK_HOUR);
 
-                if let Err(e) = send_telegram_message(&client, &bot_token, chat_id, &message).await
+                if now.hour() == haiku_hour
+                    && last_haiku_report.map_or(true, |d| d < today)
                 {
-                    eprintln!("[checkin] Failed to send Telegram message: {}", e);
-                } else {
-                    if needs_daily {
-                        last_daily = Some(today);
+                    eprintln!("[checkin] Economy — Haiku morning report");
+                    if let Some(finding) = run_economy_report(
+                        &supabase,
+                        &agent_config,
+                        &health,
+                        EconomyReport::MorningHaiku,
+                    )
+                    .await
+                    {
+                        post_economy_report(&supabase, &finding, EconomyReport::MorningHaiku).await;
+                        let message = format_economy_telegram(
+                            &health,
+                            EconomyReport::MorningHaiku,
+                            &finding,
+                        );
+                        let _ = send_telegram_message(&client, &bot_token, chat_id, &message).await;
                     }
+                    last_haiku_report = Some(today);
+                }
 
-                    let entry = CheckinLogEntry {
-                        checkin_type: checkin_cfg.checkin_type.clone(),
-                        status: if needs_alert { "alert" } else { "daily" }.to_string(),
-                        message_sent: message,
-                        system_health: Some(serde_json::to_value(&health).unwrap_or_default()),
-                    };
-                    if let Err(e) = supabase.write_checkin_log(&entry).await {
-                        eprintln!("[checkin] Failed to write checkin log: {}", e);
+                if now.hour() == grok_hour && last_grok_report.map_or(true, |d| d < today) {
+                    eprintln!("[checkin] Economy — Grok end-of-day report");
+                    if let Some(finding) = run_economy_report(
+                        &supabase,
+                        &agent_config,
+                        &health,
+                        EconomyReport::EndOfDayGrok,
+                    )
+                    .await
+                    {
+                        post_economy_report(&supabase, &finding, EconomyReport::EndOfDayGrok).await;
+                        let message = format_economy_telegram(
+                            &health,
+                            EconomyReport::EndOfDayGrok,
+                            &finding,
+                        );
+                        let _ = send_telegram_message(&client, &bot_token, chat_id, &message).await;
+                    }
+                    last_grok_report = Some(today);
+                }
+            } else {
+                let needs_daily = last_daily.map_or(true, |d| d < today);
+                let needs_exploration = last_exploration.map_or(true, |d| d < today);
+
+                // Weekly research sweep: Sunday midnight, rotates model each week.
+                let is_weekly_sweep = needs_daily
+                    && now.weekday() == chrono::Weekday::Sun
+                    && now.hour() == 0;
+
+                // Monthly Opus synthesis: fires at the start of each new 4-week cycle
+                // (when cycle_week == 0, i.e. weeks 1, 5, 9, 13… of the year).
+                let week_num = now.iso_week().week();
+                let current_cycle = (week_num - 1) / 4;
+                let is_new_cycle = is_weekly_sweep
+                    && (week_num - 1) % 4 == 0
+                    && last_synthesis_cycle.map_or(true, |c| c < current_cycle);
+
+                // ── Monthly synthesis (Opus when funded; Grok stand-in while Opus slot is Gemma) ──
+                if is_new_cycle {
+                    eprintln!(
+                        "[checkin] New 4-week cycle {} — running monthly synthesis ({})",
+                        current_cycle,
+                        monthly_synthesis_model()
+                    );
+                    if let Some(synthesis) = run_monthly_synthesis(&supabase, &agent_config).await {
+                        run_meeting_of_minds(&supabase, &agent_config, &synthesis).await;
+                    }
+                    last_synthesis_cycle = Some(current_cycle);
+                }
+
+                // ── Weekly skill gardening — prune dead skills, flag weak ones ──
+                if is_weekly_sweep {
+                    if let Some(ref sc) = agent_config.skills {
+                        let gardener = argus_core::skills::SkillGardener {
+                            skills: sc.clone(),
+                            discord_bot_token: agent_config.discord_bot_token.clone(),
+                            discord_channel_id: agent_config.discord_channel_id,
+                            http: reqwest::Client::new(),
+                        };
+                        tokio::spawn(async move { gardener.run_maintenance().await });
                     }
                 }
-            }
 
-            // ── Daily two-model exploration ("the eyes") ──────────────────────
-            // Runs every day. Two different models, rotating pair so no two days
-            // use the same combination. Both go explore freely and post to Discord.
-            // Context is rebuilt between models so model_b reads model_a's post
-            // and can acknowledge, extend, or push back on it.
-            if needs_exploration && !needs_alert {
-                let day_of_year = now.ordinal();
-                let (model_a, model_b) = daily_exploration_pair(day_of_year);
-                eprintln!("[checkin] Daily exploration — eyes: {} + {}", model_a, model_b);
-                let discord_block_a = build_discord_context(&supabase).await;
-                run_daily_exploration(&supabase, &agent_config, model_a, &discord_block_a).await;
-                // Rebuild so model_b sees model_a's post and can respond to it.
-                let discord_block_b = build_discord_context(&supabase).await;
-                run_daily_exploration(&supabase, &agent_config, model_b, &discord_block_b).await;
-                last_exploration = Some(today);
+                if needs_alert || needs_daily {
+                    let schedule_summary = read_schedule_summary(&supabase).await;
+
+                    let agent_finding: Option<String> = if needs_daily && !needs_alert {
+                        run_agent_checkin(&supabase, &agent_config, &health, is_weekly_sweep).await
+                    } else {
+                        None
+                    };
+
+                    if let Some(ref finding) = agent_finding {
+                        post_finding_to_discourse(&supabase, &agent_config, finding, is_weekly_sweep)
+                            .await;
+                    }
+
+                    let message = format_checkin_message(
+                        &health,
+                        &schedule_summary,
+                        needs_alert,
+                        needs_daily,
+                        agent_finding.as_deref(),
+                    );
+
+                    if let Err(e) = send_telegram_message(&client, &bot_token, chat_id, &message).await
+                    {
+                        eprintln!("[checkin] Failed to send Telegram message: {}", e);
+                    } else {
+                        if needs_daily {
+                            last_daily = Some(today);
+                        }
+
+                        let entry = CheckinLogEntry {
+                            checkin_type: checkin_cfg.checkin_type.clone(),
+                            status: if needs_alert { "alert" } else { "daily" }.to_string(),
+                            message_sent: message,
+                            system_health: Some(serde_json::to_value(&health).unwrap_or_default()),
+                        };
+                        if let Err(e) = supabase.write_checkin_log(&entry).await {
+                            eprintln!("[checkin] Failed to write checkin log: {}", e);
+                        }
+                    }
+                }
+
+                // ── Daily two-model exploration ("the eyes") ──────────────────────
+                if needs_exploration && !needs_alert {
+                    let day_of_year = now.ordinal();
+                    let (model_a, model_b) = daily_exploration_pair(day_of_year);
+                    eprintln!("[checkin] Daily exploration — eyes: {} + {}", model_a, model_b);
+                    let discord_block_a = build_discord_context(&supabase).await;
+                    run_daily_exploration(&supabase, &agent_config, model_a, &discord_block_a).await;
+                    let discord_block_b = build_discord_context(&supabase).await;
+                    run_daily_exploration(&supabase, &agent_config, model_b, &discord_block_b).await;
+                    last_exploration = Some(today);
+                }
             }
         }
 
         let interval = Duration::from_secs(checkin_cfg.interval_minutes.max(1) as u64 * 60);
         sleep(interval).await;
     }
+}
+
+async fn run_economy_report(
+    supabase: &SupabaseClient,
+    config: &AgentConfig,
+    health: &SystemHealth,
+    kind: EconomyReport,
+) -> Option<String> {
+    let discourse_block = match supabase.read_recent_discourse(12, None).await {
+        Ok(posts) if !posts.is_empty() => {
+            let mut block = String::from("RECENT INTRANET (last 12 posts):\n");
+            for post in &posts {
+                let ts = post.created_at.as_deref().unwrap_or("?");
+                let snippet = if post.content.chars().count() > 220 {
+                    format!("{}…", post.content.chars().take(220).collect::<String>())
+                } else {
+                    post.content.clone()
+                };
+                block.push_str(&format!(
+                    "\n[{} | {}] {}: {}",
+                    ts, post.post_type, post.from_agent, snippet
+                ));
+            }
+            block
+        }
+        _ => "RECENT INTRANET: Quiet — no posts in the last period.".to_string(),
+    };
+
+    let audit_block = if let Some(ref audit) = config.audit {
+        match audit.entry_count_today() {
+            Ok(n) => format!("AUDIT TODAY: {} tool/model calls logged.", n),
+            Err(e) => format!("AUDIT TODAY: unavailable ({})", e),
+        }
+    } else {
+        "AUDIT TODAY: not configured.".to_string()
+    };
+
+    let health_block = format!(
+        "SYSTEM: Disk {} | Memory {} | Containers {}",
+        health.disk,
+        health.memory,
+        if health.has_unhealthy_container {
+            "ISSUE"
+        } else {
+            "healthy"
+        }
+    );
+
+    let (model, label, instructions) = match kind {
+        EconomyReport::MorningHaiku => (
+            MODEL_HAIKU,
+            "MORNING PULSE",
+            "You are Haiku on the morning watch. No tools — context only.\n\
+             Write a tight morning pulse (4–6 sentences): system posture, one thing \
+             worth attention in the intranet or audit trail, one honest priority for \
+             the day. Specific, not performative. This is data for the record.",
+        ),
+        EconomyReport::EndOfDayGrok => (
+            MODEL_GROK,
+            "END OF DAY",
+            "You are Grok closing the day. No tools — context only.\n\
+             Write an end-of-day wrap (5–8 sentences): what actually moved today \
+             (from intranet + audit), what carries into tomorrow, one direct note \
+             to Bradlee if something needs eyes. No web crawl. Synthesize what's \
+             already in the record.",
+        ),
+    };
+
+    let prompt = format!(
+        "[ECONOMY REPORT — {}]\n\n{}\n\n{}\n\n{}\n\n{}\n",
+        label, instructions, health_block, audit_block, discourse_block
+    );
+
+    let report_config = AgentConfig {
+        model: model.to_string(),
+        blocked_tools: ECONOMY_BLOCKED_TOOLS.iter().map(|s| s.to_string()).collect(),
+        ..config.clone()
+    };
+
+    let http = reqwest::Client::new();
+    let mut mcp = McpClient::new();
+    let shell_policy = ShellPolicy::default();
+    let memory = NoopMemory;
+
+    eprintln!("[checkin] Economy report — {} ({})", label, model);
+
+    match run_agent_turn(
+        &report_config,
+        &prompt,
+        &[],
+        &shell_policy,
+        &memory,
+        &mut mcp,
+        &http,
+        |event| {
+            if let AgentEvent::ToolCall { name, preview, .. } = event {
+                eprintln!("[economy] tool blocked/attempted: {} — {}", name, preview);
+            }
+        },
+    )
+    .await
+    {
+        Ok(text) if !text.trim().is_empty() => Some(text),
+        Ok(_) => None,
+        Err(e) => {
+            eprintln!("[checkin] Economy report failed ({}): {}", label, e);
+            None
+        }
+    }
+}
+
+async fn post_economy_report(
+    supabase: &SupabaseClient,
+    finding: &str,
+    kind: EconomyReport,
+) {
+    let (from_agent, post_type, banner) = match kind {
+        EconomyReport::MorningHaiku => (
+            "argus-economy/haiku",
+            "finding",
+            "**[MORNING PULSE — Haiku]**",
+        ),
+        EconomyReport::EndOfDayGrok => (
+            "argus-economy/grok",
+            "reflection",
+            "**[END OF DAY — Grok]**",
+        ),
+    };
+
+    let post = DiscoursePost {
+        from_agent: from_agent.to_string(),
+        post_type: post_type.to_string(),
+        content: format!("{}\n\n{}", banner, finding),
+        task_context: Some("economy_report".to_string()),
+        requires_human_review: false,
+    };
+    if let Err(e) = supabase.write_discourse(&post).await {
+        eprintln!("[checkin] Economy discourse post failed: {}", e);
+    }
+}
+
+fn format_economy_telegram(
+    health: &SystemHealth,
+    kind: EconomyReport,
+    finding: &str,
+) -> String {
+    let (emoji, title) = match kind {
+        EconomyReport::MorningHaiku => ("🌅", "Haiku Morning"),
+        EconomyReport::EndOfDayGrok => ("🌙", "Grok End of Day"),
+    };
+    format!(
+        "{} Argus {} — {}\n\n{}\n\nDisk: {} | Memory: {} | Containers: {}",
+        emoji,
+        title,
+        health.timestamp,
+        finding,
+        health.disk,
+        health.memory,
+        if health.has_unhealthy_container {
+            "CHECK"
+        } else {
+            "healthy"
+        }
+    )
 }
 
 fn in_quiet_hours(config: &argus_core::supabase::CheckinConfig) -> bool {

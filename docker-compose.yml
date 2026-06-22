@@ -17,6 +17,10 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
       - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID:-}
       - ARGUS_WS_TOKEN=${ARGUS_WS_TOKEN:-}
+      # Economy mode: 2 LLM reports/day (Haiku 08:00, Grok 20:00 local). Set 0 to restore full exploration.
+      - ARGUS_ECONOMY_MODE=${ARGUS_ECONOMY_MODE:-1}
+      - ARGUS_REPORT_HAIKU_HOUR=${ARGUS_REPORT_HAIKU_HOUR:-8}
+      - ARGUS_REPORT_GROK_HOUR=${ARGUS_REPORT_GROK_HOUR:-20}
     ports:
       - "127.0.0.1:8888:8888"
       - "127.0.0.1:9000:9000"
