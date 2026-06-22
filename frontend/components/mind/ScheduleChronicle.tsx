@@ -1,8 +1,8 @@
 'use client';
 
 import { useAgentStore } from '@/hooks/useAgentState';
-import { ScheduledTask, ModelId } from '@/lib/types';
-import { MODEL_CONFIG } from '@/lib/models';
+import { ScheduledTask } from '@/lib/types';
+import { getModelConfig } from '@/lib/models';
 
 function groupByPeriod(tasks: ScheduledTask[]) {
   const now = new Date();
@@ -54,7 +54,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 function TaskRow({ task }: { task: ScheduledTask }) {
-  const cfg = MODEL_CONFIG[task.agent as ModelId] ?? { name: task.agent, color: '#9a9aa8' };
+  const cfg = getModelConfig(task.agent);
   const ts = task.runAt ? new Date(task.runAt) : new Date(task.createdAt);
   const statusCol = STATUS_COLOR[task.status] ?? '#5a5a68';
 
@@ -116,7 +116,7 @@ function ModelSummary({ tasks, period }: { tasks: ScheduledTask[]; period: strin
       <div className="text-[8px] font-mono tracking-[1.5px] text-[#c084fc]/50 mb-1.5 uppercase">{period} summary</div>
       <div className="flex flex-wrap gap-1.5">
         {Object.entries(counts).map(([model, count]) => {
-          const cfg = MODEL_CONFIG[model as ModelId] ?? { name: model, color: '#9a9aa8' };
+          const cfg = getModelConfig(model);
           return (
             <div key={model} className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: cfg.color }} />

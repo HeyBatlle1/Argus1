@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import { useAgentStore } from '@/hooks/useAgentState';
 import { ModelId } from '@/lib/types';
-import { MODEL_CONFIG } from '@/lib/models';
+import { getModelConfig } from '@/lib/models';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
 
@@ -61,7 +61,7 @@ export function SemanticField() {
     });
 
     scheduledTasks.forEach((task, i) => {
-      const cfg = MODEL_CONFIG[task.agent as ModelId] ?? { name: task.agent, color: '#9a9aa8' };
+      const cfg = getModelConfig(task.agent);
       const shortDesc = task.description.length > 36
         ? task.description.slice(0, 36) + '…'
         : task.description;

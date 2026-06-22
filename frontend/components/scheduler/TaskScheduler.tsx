@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Clock, Zap, Send, CheckCircle2, XCircle, Loader2, AlertCircle } from 'lucide-react';
 import { useAgentStore } from '@/hooks/useAgentState';
-import { MODEL_CONFIG, MODELS_IN_ORDER } from '@/lib/models';
+import { MODEL_CONFIG, MODELS_IN_ORDER, getModelConfig } from '@/lib/models';
 import { ModelId, ScheduledTask } from '@/lib/types';
 
 interface Props {
@@ -99,7 +99,7 @@ export function TaskScheduler({ onClose }: Props) {
               </label>
               <div className="grid grid-cols-2 gap-1.5">
                 {MODELS_IN_ORDER.map((id) => {
-                  const m = MODEL_CONFIG[id];
+                  const m = getModelConfig(id);
                   const active = selectedAgent === id;
                   return (
                     <button
@@ -308,7 +308,7 @@ function TimingTab({
 }
 
 function TaskCard({ task }: { task: ScheduledTask }) {
-  const m = MODEL_CONFIG[task.agent as ModelId] ?? { icon: '?', name: task.agent, tier: 'allied' };
+  const m = getModelConfig(task.agent);
 
   const statusConfig = {
     pending: { icon: <Clock size={11} />, color: '#7a7a9a', label: 'Pending' },

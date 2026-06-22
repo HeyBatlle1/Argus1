@@ -2,7 +2,7 @@
 
 import { useAgentStore } from '@/hooks/useAgentState';
 import { EyeStateIndicator } from '@/components/shared/EyeStateIndicator';
-import { MODEL_CONFIG } from '@/lib/models';
+import { getModelConfig } from '@/lib/models';
 import { EYE_COLORS } from '@/lib/constants';
 
 function timeAgo(iso: string): string {
@@ -23,7 +23,7 @@ export function NexusSignalStrip() {
   const activity     = useAgentStore((s) => s.activity);
   const activeToolCalls = useAgentStore((s) => s.activeToolCalls);
 
-  const modelCfg = MODEL_CONFIG[activeModel];
+  const modelCfg = getModelConfig(activeModel);
   const last = activity[0];
   const stateColor = EYE_COLORS[eyeState];
 

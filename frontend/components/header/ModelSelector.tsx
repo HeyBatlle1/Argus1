@@ -174,7 +174,7 @@ function ModelOption({
   onSelect: (id: ModelId) => void;
   showToolToggle?: boolean;
 }) {
-  const m = MODEL_CONFIG[id];
+  const m = getModelConfig(id);
   return (
     <div
       className={`flex items-center px-2 py-1.5 rounded transition-colors mb-0.5 ${

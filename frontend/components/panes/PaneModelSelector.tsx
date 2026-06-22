@@ -53,7 +53,7 @@ export function PaneModelSelector({ model, onSwitch }: Props) {
               style={{ background: '#0d0d18', border: '1px solid #1e1e32', width: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.6)' }}
             >
               {MODELS_IN_ORDER.map((id) => {
-                const m = MODEL_CONFIG[id];
+                const m = getModelConfig(id);
                 const active = id === model;
                 return (
                   <button

@@ -437,8 +437,9 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
 
   switchModel: (model: ModelId) => {
-    set({ activeModel: model, accessTier: getModelTier(model) });
-    get()._ws?.send({ type: 'switch_model', model });
+    const id = normalizeModelId(model);
+    set({ activeModel: id, accessTier: getModelTier(id) });
+    get()._ws?.send({ type: 'switch_model', model: id });
   },
 
   setEyeState: (state: EyeState) => set({ eyeState: state }),

@@ -700,7 +700,13 @@ async fn handle_socket(
                 let mut c = conn.lock().await;
                 let new_id = uuid::Uuid::new_v4().to_string();
                 let title = "New Conversation".to_string();
-                let _ = c.memory.upsert_conversation(&new_id, &title, "web", Some(&c.config.model), 0);
+                let _ = c.memory.upsert_conversation(
+                    &new_id,
+                    &title,
+                    "web",
+                    Some(c.current_frontend_model().as_str()),
+                    0,
+                );
                 c.conversation_id = new_id.clone();
                 c.conversation_title = title.clone();
                 c.history.clear();
@@ -715,7 +721,15 @@ async fn handle_socket(
                 let history = c.memory.load_history_str(&id).unwrap_or_default();
                 let meta = c.memory.list_conversations(30).unwrap_or_default()
                     .into_iter().find(|m| m.id == id);
-                let title = meta.map(|m| m.title).unwrap_or_else(|| "Conversation".to_string());
+                let title = meta
+                    .as_ref()
+                    .map(|m| m.title.clone())
+                    .unwrap_or_else(|| "Conversation".to_string());
+                if let Some(m) = meta.as_ref() {
+                    if let Some(ref model) = m.model {
+                        c.apply_model_switch(model);
+                    }
+                }
                 c.conversation_id = id.clone();
                 c.conversation_title = title.clone();
                 c.history = history.clone();
@@ -724,8 +738,13 @@ async fn handle_socket(
                     content: m.content.clone(),
                     model: m.model.clone(),
                 }).collect();
+                let current_model = c.current_frontend_model();
                 let _ = tx.send(ServerMessage::ConversationStarted { id: id.clone(), title });
                 let _ = tx.send(ServerMessage::ConversationHistory { id, messages });
+                let _ = tx.send(ServerMessage::Status {
+                    eye_state: "watching".to_string(),
+                    model: current_model,
+                });
             }
 
             ClientMessage::ListConversations => {
@@ -877,7 +896,7 @@ async fn handle_user_message(
                     &c.conversation_id,
                     &c.conversation_title,
                     "web",
-                    Some(&c.config.model),
+                    Some(c.current_frontend_model().as_str()),
                     c.history.len() / 2,
                 );
                 (c.current_frontend_model(), build_memory_update(&c.memory))

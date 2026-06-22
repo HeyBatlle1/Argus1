@@ -14,7 +14,7 @@ const TIER_CONFIG = {
 };
 
 export function TierBadge({ tier, className = '' }: Props) {
-  const cfg = TIER_CONFIG[tier];
+  const cfg = TIER_CONFIG[tier] ?? TIER_CONFIG.royal;
   return (
     <span
       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono tracking-wider ${className}`}
