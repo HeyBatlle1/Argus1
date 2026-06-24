@@ -1,6 +1,7 @@
 //! Agent orchestration loop
 
 use crate::mcp::McpClient;
+use crate::sentry_bus::SentryBus;
 use crate::shell::ShellPolicy;
 use crate::tools::{self, MemoryBackend};
 use crate::embedding::EmbeddingClient;
@@ -88,6 +89,14 @@ HOW WE WORK:
 • Read the full context before responding. This is not timed. Accuracy is what
   matters — the person you are talking with knows tool calls take time and is
   fine with it.
+• discord_read: keep limit at 15 or below — large reads overflow context and crash the turn.
+
+GIT IS THE ONLY SOURCE OF TRUTH:
+If it isn't committed, it didn't happen. This is not a suggestion.
+• Found something worth keeping → write_file then git_checkpoint with a hash.
+• Proposed a change → implement it, then git_checkpoint.
+• "I'll remember this" → NOT enough. remember() is personal. git_checkpoint is institutional.
+No findings without a commit hash. No proposals without a file.
 
 ON TRUTH:
 Your honest read of any situation — including ones where you were wrong — is more
@@ -403,6 +412,9 @@ pub const MODEL_GROK_BUILD: &str = "x-ai/grok-build-0.1";
 pub const MODEL_GROK_MULTI: &str = "x-ai/grok-4.20-multi-agent";
 /// Dedicated triage gate — smaller Gemma, structured JSON output.
 pub const MODEL_TRIAGE: &str = "google/gemma-4-26b-a4b-it:free";
+/// Sentry — red team consciousness. Same model as Gemma runtime but distinct role.
+/// IBM Granite 4 drops in here in production without changing any other constant.
+pub const MODEL_SENTRY: &str = "google/gemma-4-31b-it:free";
 
 const PERSONA_HAIKU:  &str = "RUNTIME PERSONA — HAIKU: You are the operations coordinator. Fast baseline truth, practical handoffs, no performance.";
 const PERSONA_SONNET: &str = "RUNTIME PERSONA — SONNET: You are the balanced core mind. Structure problems clearly, reason step by step, ship coherent answers.";
@@ -454,6 +466,8 @@ pub fn model_label(model_id: &str) -> &'static str {
         MODEL_GROK_MULTI  => "Grok Multi",
         MODEL_GEMINI => "Gemini",
         MODEL_TRIAGE => "Triage (Gemma 4)",
+        // MODEL_SENTRY shares the same string value as MODEL_OPUS (same free model).
+        // Role is distinguished via system_prompt_override + frontend_persona = "sentry".
         _            => "Unknown model",
     }
 }
@@ -501,6 +515,13 @@ pub struct AgentConfig {
     pub supabase_jwt: Option<String>,
     /// Frontend model alias (e.g. `claude-haiku`) — preserves persona when backend IDs collide.
     pub frontend_persona: Option<String>,
+    /// When set, replaces SYSTEM_PROMPT_BASE entirely. Used by Sentry and future
+    /// role-specific agents that need a completely different identity than standard Argus.
+    /// Date and discourse context are still injected; semantic memory and skills are not.
+    pub system_prompt_override: Option<String>,
+    /// Shared Sentry threat bus. When set, active threat posture is injected into
+    /// every Daemon agent turn so the model is aware of what Sentry is seeing.
+    pub sentry_bus: Option<Arc<SentryBus>>,
 }
 
 impl AgentConfig {
@@ -508,7 +529,7 @@ impl AgentConfig {
         let brave_search_key = std::env::var("BRAVE_SEARCH_API_KEY").ok();
         Self {
             api_key,
-            model: MODEL_GROK_BUILD.to_string(),
+            model: MODEL_GEMMA_RUNTIME.to_string(),
             api_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
             temperature: 0.7,
             brave_search_key,
@@ -523,7 +544,9 @@ impl AgentConfig {
             discord_channel_id: None,
             supabase_url: None,
             supabase_jwt: None,
-            frontend_persona: Some("grok-build".to_string()),
+            frontend_persona: Some("gemma".to_string()),
+            system_prompt_override: None,
+            sentry_bus: None,
         }
     }
 
@@ -539,13 +562,13 @@ impl AgentConfig {
 
     pub fn toggle_model(&mut self) -> &str {
         self.model = match self.model.as_str() {
-            MODEL_HAIKU      => MODEL_SONNET.to_string(),
-            MODEL_SONNET     => MODEL_OPUS.to_string(),
-            MODEL_OPUS        => MODEL_GROK.to_string(),
+            MODEL_HAIKU       => MODEL_SONNET.to_string(),
+            MODEL_SONNET      => MODEL_GEMMA_RUNTIME.to_string(),
+            MODEL_GEMMA_RUNTIME => MODEL_GROK.to_string(),
             MODEL_GROK        => MODEL_GROK_BUILD.to_string(),
             MODEL_GROK_BUILD  => MODEL_GROK_MULTI.to_string(),
             MODEL_GROK_MULTI  => MODEL_GEMINI.to_string(),
-            _                => MODEL_HAIKU.to_string(),  // gemini and any unknown → back to haiku
+            _                 => MODEL_HAIKU.to_string(),
         };
         &self.model
     }
@@ -555,12 +578,13 @@ impl AgentConfig {
             "haiku"  | MODEL_HAIKU  => MODEL_HAIKU.to_string(),
             "sonnet" | MODEL_SONNET => MODEL_SONNET.to_string(),
             "opus"   | MODEL_OPUS   => MODEL_OPUS.to_string(),
-            "nemotron"   | MODEL_GROK       => MODEL_GROK.to_string(),
+            "grok" | "nemotron" | MODEL_GROK => MODEL_GROK.to_string(),
             "grok-build"  | MODEL_GROK_BUILD  => MODEL_GROK_BUILD.to_string(),
             "grok-multi" | MODEL_GROK_MULTI => MODEL_GROK_MULTI.to_string(),
             "gemini"     | MODEL_GEMINI     => MODEL_GEMINI.to_string(),
+            "gemma" | "gemma4" | MODEL_GEMMA_RUNTIME => MODEL_GEMMA_RUNTIME.to_string(),
             other => return Err(format!(
-                "Unknown model '{}'. Use: haiku, sonnet, opus, nemotron, gemini", other
+                "Unknown model '{}'. Use: haiku, sonnet, opus, grok, gemini, gemma", other
             )),
         };
         Ok(&self.model)
@@ -722,20 +746,46 @@ where
         });
     }
 
-    // System prompt with semantic context and skills injected
+    // System prompt assembly
     let history_context = format_history_block(history);
-    let mut system_prompt = build_system_prompt(
-        &config.model,
-        config.frontend_persona.as_deref(),
-        semantic_context.as_deref(),
-        discourse_context.as_deref(),
-        history_context.as_deref(),
-    );
-    // Skills go after memory context — procedural before factual reads more naturally
-    if !skill_context.is_empty() {
-        system_prompt.push_str("\n\n");
-        system_prompt.push_str(&skill_context);
-    }
+    let system_prompt = if let Some(ref override_prompt) = config.system_prompt_override {
+        // Role-specific agents (Sentry etc.) get their own identity, not SYSTEM_PROMPT_BASE.
+        // Still inject current date and discourse so they're grounded in the live system.
+        let now = chrono::Utc::now();
+        let date_str = now.format("%A, %B %d, %Y").to_string();
+        let mut p = format!("{}\n\nCURRENT DATE: {} UTC.", override_prompt, date_str);
+        if let Some(disc) = discourse_context.as_deref() {
+            if !disc.is_empty() {
+                p.push_str("\n\n");
+                p.push_str(disc);
+            }
+        }
+        p
+    } else {
+        let mut p = build_system_prompt(
+            &config.model,
+            config.frontend_persona.as_deref(),
+            semantic_context.as_deref(),
+            discourse_context.as_deref(),
+            history_context.as_deref(),
+        );
+        // Skills go after memory context — procedural before factual reads more naturally.
+        // Skipped for overridden prompts — role agents manage their own procedures.
+        if !skill_context.is_empty() {
+            p.push_str("\n\n");
+            p.push_str(&skill_context);
+        }
+        // Sentry threat posture — injected last so it's the freshest context the model sees.
+        // Sentry writes here; the Daemon reads it on every turn. Direct shared memory,
+        // no Discord round-trip. Empty when everything is clean.
+        if let Some(ref bus) = config.sentry_bus {
+            if let Some(posture) = bus.posture_for_prompt() {
+                p.push_str("\n\n");
+                p.push_str(&posture);
+            }
+        }
+        p
+    };
 
     let mut messages = vec![
         serde_json::json!({"role": "system", "content": system_prompt}),
@@ -1091,13 +1141,17 @@ fn maybe_reflect_on_skill(
 
         match sc.create_skill(NewSkill {
             skill_name: skill_name.clone(),
-            trigger_description: trigger,
+            trigger_description: trigger.clone(),
             procedure_steps: steps,
-            model_created_by: model_used,
+            model_created_by: model_used.clone(),
             metadata: None,
         }).await {
-            Ok(name) => eprintln!("[skills] New skill acquired: \"{}\"", name),
-            Err(e)   => eprintln!("[skills] Skill creation failed: {}", e),
+            Ok(name) => {
+                eprintln!("[skills] New skill acquired: \"{}\"", name);
+                // Announce to the team — other agents learn it exists immediately
+                sc.announce_created(&name, &trigger, &model_used).await;
+            }
+            Err(e) => eprintln!("[skills] Skill creation failed: {}", e),
         }
     });
 }

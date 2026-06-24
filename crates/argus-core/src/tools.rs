@@ -200,12 +200,26 @@ pub fn builtin_tool_schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "discord_read",
-                "description": "Read recent messages from the shared Argus Discord channel. Use this to see what other instances of Argus have posted, check current discussion, or catch up on activity since your last turn.",
+                "description": "Read recent messages from the shared Argus Discord channel. Use this to see what other instances of Argus have posted, check current discussion, or catch up on activity since your last turn. Keep limit low — large reads overflow context.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "limit": { "type": "number", "description": "Number of recent messages to retrieve (default 20, max 50)" }
+                        "limit": { "type": "number", "description": "Number of recent messages to retrieve (default 15, max 20 — hard capped to protect context)" }
                     }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "git_checkpoint",
+                "description": "Commit all staged and unstaged changes in /workspace to git with a message. Use this after every meaningful finding, code change, or document you write — if it isn't committed, it didn't happen. Returns the commit hash.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "message": { "type": "string", "description": "Commit message — what you did and why. Include [FINDING], [SKILL], [ARCH], or [FIX] tag so the log is scannable." }
+                    },
+                    "required": ["message"]
                 }
             }
         },
@@ -290,6 +304,53 @@ pub fn builtin_tool_schemas() -> Vec<Value> {
                     "required": ["skill_id", "refined_steps"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "challenge_skill",
+                "description": "Challenge a skill you believe is wrong, outdated, or dangerous. Posts a proposal to #proposals so the team can vote. Use when a skill consistently fails or you have a fundamentally better approach.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "skill_name":    { "type": "string", "description": "Name of the skill being challenged" },
+                        "skill_id":      { "type": "string", "description": "ID of the skill — from recall_skill results" },
+                        "reason":        { "type": "string", "description": "Why the skill is wrong or needs replacement — be specific about what fails and why" },
+                        "proposed_fix":  { "type": "string", "description": "Your proposed replacement procedure, or 'retire' to remove it entirely" }
+                    },
+                    "required": ["skill_name", "skill_id", "reason"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "invoke_skill",
+                "description": "Explicitly invoke a skill by name to follow its documented procedure. Returns the full steps. Call this when you intend to actually follow a skill rather than just reference it — it logs the invocation for success tracking.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "skill_name": { "type": "string", "description": "Name of the skill to invoke — exact or close match" }
+                    },
+                    "required": ["skill_name"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "complete_skill",
+                "description": "Mark a skill invocation as complete. Call this after finishing a skill you invoked with invoke_skill — records whether it worked so the library improves over time.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "skill_id":  { "type": "string", "description": "ID of the skill that was used" },
+                        "success":   { "type": "boolean", "description": "Whether the skill procedure produced the intended outcome" },
+                        "notes":     { "type": "string", "description": "Optional: what worked, what didn't, any deviation from the documented steps" }
+                    },
+                    "required": ["skill_id", "success"]
+                }
+            }
         }
     ]).as_array().expect("tool schema is a literal JSON array").clone()
 }
@@ -326,10 +387,14 @@ pub async fn execute_builtin(
         "run_wasm"       => Some(tool_run_wasm(args).await),
         "discord_post"   => Some(tool_discord_post(args, http_client, discord_bot_token, discord_channel_id, supabase_url, supabase_jwt, current_model).await),
         "discord_read"   => Some(tool_discord_read(args, http_client, discord_bot_token, discord_channel_id).await),
-        "publish_skill"  => Some(tool_publish_skill(args, skills, current_model).await),
-        "recall_skill"   => Some(tool_recall_skill(args, skills).await),
-        "improve_skill"  => Some(tool_improve_skill(args, skills).await),
-        "list_tools"     => Some("Use the tool schemas you already have — this meta-tool is informational only.".to_string()),
+        "publish_skill"   => Some(tool_publish_skill(args, skills, current_model).await),
+        "recall_skill"    => Some(tool_recall_skill(args, skills).await),
+        "improve_skill"   => Some(tool_improve_skill(args, skills).await),
+        "git_checkpoint"  => Some(tool_git_checkpoint(args, http_client, exec_auth_token).await),
+        "challenge_skill" => Some(tool_challenge_skill(args, skills, current_model).await),
+        "invoke_skill"    => Some(tool_invoke_skill(args, skills).await),
+        "complete_skill"  => Some(tool_complete_skill(args, skills).await),
+        "list_tools"      => Some("Use the tool schemas you already have — this meta-tool is informational only.".to_string()),
         _                => None,
     }
 }
@@ -1015,7 +1080,9 @@ async fn tool_discord_read(
         Some(id) => id,
         None => return "discord_read not configured — DISCORD_CHANNEL_ID is not set.".to_string(),
     };
-    let limit = args["limit"].as_u64().unwrap_or(20).min(50);
+    // Hard cap at 20 — Gemma 4 31B free has limited context headroom.
+    // Calling twice to get more messages will overflow. Read less, think more.
+    let limit = args["limit"].as_u64().unwrap_or(15).min(20);
 
     let url = format!(
         "https://discord.com/api/v10/channels/{}/messages?limit={}",
@@ -1189,4 +1256,153 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         }
     }
     Ok(out)
+}
+
+// ── Git checkpoint ─────────────────────────────────────────────────────────
+
+async fn tool_git_checkpoint(args: &Value, http: &reqwest::Client, exec_auth_token: Option<&str>) -> String {
+    let message = args["message"].as_str().unwrap_or("").trim();
+    if message.is_empty() {
+        return "git_checkpoint requires a commit message.".to_string();
+    }
+
+    // Sanitize — no shell injection via commit message
+    let safe_msg: String = message.chars()
+        .map(|c| if c == '\'' || c == '`' || c == '\\' { ' ' } else { c })
+        .collect();
+
+    let command = format!(
+        "cd /workspace && git add -A && git diff --cached --stat | head -20 && \
+         git commit -m '{safe_msg}' 2>&1 && echo 'HASH:'$(git rev-parse --short HEAD)"
+    );
+
+    let payload = serde_json::json!({ "command": command });
+    let mut req = http
+        .post("http://argus-workspace:9001/exec")
+        .json(&payload)
+        .timeout(std::time::Duration::from_secs(30));
+
+    if let Some(token) = exec_auth_token {
+        req = req.header("X-Argus-Auth", token);
+    }
+
+    match req.send().await {
+        Err(e) => format!("git_checkpoint: workspace unreachable — {}", e),
+        Ok(r) => match r.json::<serde_json::Value>().await {
+            Err(e) => format!("git_checkpoint: response error — {}", e),
+            Ok(json) => {
+                let out = json["output"].as_str()
+                    .or_else(|| json["stdout"].as_str())
+                    .unwrap_or("").trim_end();
+                let err = json["stderr"].as_str().unwrap_or("").trim_end();
+
+                // Extract hash from HASH: line
+                let hash = out.lines()
+                    .find(|l| l.starts_with("HASH:"))
+                    .map(|l| l.trim_start_matches("HASH:").trim())
+                    .unwrap_or("");
+
+                if !hash.is_empty() {
+                    format!("✓ Committed `{}` — in the record.\n\n{}", hash, out)
+                } else if !err.is_empty() {
+                    format!("git error:\n{}\n{}", out, err)
+                } else {
+                    out.to_string()
+                }
+            }
+        }
+    }
+}
+
+// ── Skill social tools ─────────────────────────────────────────────────────
+
+async fn tool_challenge_skill(args: &Value, skills: Option<&SkillsClient>, current_model: &str) -> String {
+    let Some(sc) = skills else {
+        return "Skill library not configured.".to_string();
+    };
+    let skill_name = args["skill_name"].as_str().unwrap_or("").trim();
+    let skill_id   = args["skill_id"].as_str().unwrap_or("").trim();
+    let reason     = args["reason"].as_str().unwrap_or("").trim();
+    let fix        = args["proposed_fix"].as_str().unwrap_or("(none provided)").trim();
+
+    if skill_name.is_empty() || reason.is_empty() {
+        return "challenge_skill requires: skill_name, skill_id, reason".to_string();
+    }
+
+    let content = format!(
+        "**[SKILL CHALLENGE]** `{}`\n\
+         *Raised by {}*\n\n\
+         **Why it's wrong:** {}\n\n\
+         **Proposed fix:** {}\n\n\
+         Skill ID: `{}`\n\
+         Vote with `improve_skill` to adopt the fix, or reply to disagree.",
+        skill_name, current_model, reason, fix, skill_id
+    );
+
+    // Post as a proposal — routes to #proposals via triage, requires human review
+    let body = serde_json::json!({
+        "from_agent": format!("argus-challenge/{}", current_model),
+        "post_type": "proposal",
+        "content": content,
+        "requires_human_review": true,
+        "task_context": "skill_challenge"
+    });
+
+    match sc.embedding.supabase_insert("argus_agent_discourse", &body).await {
+        Ok(_)  => format!("Challenge posted to #proposals. Skill \"{}\" is now up for revision.", skill_name),
+        Err(e) => format!("Challenge post failed: {}", e),
+    }
+}
+
+async fn tool_invoke_skill(args: &Value, skills: Option<&SkillsClient>) -> String {
+    let Some(sc) = skills else {
+        return "Skill library not configured.".to_string();
+    };
+    let skill_name = args["skill_name"].as_str().unwrap_or("").trim();
+    if skill_name.is_empty() {
+        return "invoke_skill requires: skill_name".to_string();
+    }
+
+    match sc.search_relevant(skill_name, 0.45, 1).await {
+        Err(e) => format!("Skill lookup failed: {}", e),
+        Ok(results) if results.is_empty() => {
+            format!("No skill found matching \"{}\". Use recall_skill to browse the library.", skill_name)
+        }
+        Ok(results) => {
+            let skill = &results[0];
+            // Record the invocation start
+            let _ = sc.record_usage(&skill.id, true, None).await;
+            format!(
+                "**Invoking: {}** (ID: {})\n\n\
+                 **Trigger:** {}\n\n\
+                 **Procedure:**\n{}\n\n\
+                 Follow these steps. Call `complete_skill` with the ID above when done — \
+                 pass success=true/false so the library learns.",
+                skill.skill_name, skill.id,
+                skill.trigger_description, skill.procedure_steps
+            )
+        }
+    }
+}
+
+async fn tool_complete_skill(args: &Value, skills: Option<&SkillsClient>) -> String {
+    let Some(sc) = skills else {
+        return "Skill library not configured.".to_string();
+    };
+    let skill_id = args["skill_id"].as_str().unwrap_or("").trim();
+    let success  = args["success"].as_bool().unwrap_or(true);
+    let notes    = args["notes"].as_str();
+
+    if skill_id.is_empty() {
+        return "complete_skill requires: skill_id, success".to_string();
+    }
+
+    match sc.record_usage(skill_id, success, notes).await {
+        Ok(_) => format!(
+            "Skill completion recorded — {} {}",
+            if success { "success" } else { "failure" },
+            notes.map(|n| format!("({})", n)).unwrap_or_default()
+        ),
+        Err(e) => format!("Failed to record completion: {}", e),
+    }
 }

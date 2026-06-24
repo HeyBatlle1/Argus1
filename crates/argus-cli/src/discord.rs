@@ -62,7 +62,7 @@ mod full {
     use super::*;
     use argus_core::{
         AgentEvent, ConversationMessage, MemoryBackend, MemoryRecord,
-        MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS, MODEL_GEMINI, MODEL_GROK, MODEL_GROK_BUILD,
+        MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS, MODEL_GEMINI, MODEL_GEMMA_RUNTIME, MODEL_GROK, MODEL_GROK_BUILD,
         run_agent_turn,
         shell::ShellPolicy,
         mcp::McpClient,
@@ -288,13 +288,14 @@ mod full {
     /// Map model ID to emoji + name string for Discord webhook username.
     fn model_username(model_id: &str) -> &'static str {
         match model_id {
-            MODEL_HAIKU     => "🐇 Argus · Haiku",
-            MODEL_SONNET    => "🎯 Argus · Sonnet",
-            MODEL_OPUS      => "🧠 Argus · Opus",
-            MODEL_GEMINI    => "🌟 Argus · Gemini",
-            MODEL_GROK      => "🔮 Argus · Grok",
+            MODEL_HAIKU      => "🐇 Argus · Haiku",
+            MODEL_SONNET     => "🎯 Argus · Sonnet",
+            MODEL_OPUS       => "🧠 Argus · Gemma",
+            MODEL_GEMINI     => "🌟 Argus · Gemini",
+            MODEL_GROK       => "🔮 Argus · Grok",
             MODEL_GROK_BUILD => "⚡ Argus · Grok Build",
-            _               => "⚡ Argus",
+            MODEL_GEMMA_RUNTIME => "🟢 Argus · Gemma",
+            _                => "⚡ Argus",
         }
     }
 

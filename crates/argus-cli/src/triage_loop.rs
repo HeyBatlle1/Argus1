@@ -56,7 +56,8 @@ async fn run_triage_loop(
         ("questions", "1496620088781177036"),
         ("proposals", "1496620206221426950"),
         ("general",   "1491911834666533017"),
-        ("flags",     "1496620295316832507"), // ops until we create a dedicated flags channel
+        ("flags",     "1496620295316832507"),
+        ("sentry",    "1519191046305616025"),  // 👁️sentry🏹
     ]);
 
     loop {
@@ -186,11 +187,19 @@ async fn run_triage_loop(
 }
 
 async fn post_to_discord(http: &Client, token: &str, channel_id: &str, content: &str) {
-    // Discord has a 2000 char limit per message
-    let chunks: Vec<&str> = content.as_bytes()
-        .chunks(1900)
-        .map(|c| std::str::from_utf8(c).unwrap_or(""))
-        .collect();
+    // Discord has a 2000 char limit per message — split on char boundaries, not bytes
+    let mut chunks: Vec<&str> = Vec::new();
+    let mut remaining = content;
+    while !remaining.is_empty() {
+        let split_at = remaining
+            .char_indices()
+            .take_while(|(i, _)| *i < 1900)
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(remaining.len());
+        chunks.push(&remaining[..split_at]);
+        remaining = &remaining[split_at..];
+    }
 
     for chunk in chunks {
         let _ = http

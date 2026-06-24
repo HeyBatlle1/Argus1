@@ -20,6 +20,12 @@ pub struct Skill {
     pub times_used: i32,
     pub success_rate: f64,
     pub similarity: Option<f64>,
+    /// Who wrote this skill — injected into prompt so agents feel the lineage.
+    #[serde(default)]
+    pub model_created_by: Option<String>,
+    /// When it was written — shown as YYYY-MM-DD in prompt.
+    #[serde(default)]
+    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,7 +41,7 @@ pub struct NewSkill {
 
 #[derive(Clone)]
 pub struct SkillsClient {
-    embedding: EmbeddingClient,
+    pub embedding: EmbeddingClient,
 }
 
 impl SkillsClient {
@@ -153,14 +159,43 @@ impl SkillsClient {
                 r if r >= 0.7 => "reliable",
                 _ => "experimental",
             };
+            // Show authorship so agents feel the lineage — "you wrote this" matters
+            let lineage = match (&skill.model_created_by, &skill.created_at) {
+                (Some(model), Some(date)) => {
+                    let d = date.get(..10).unwrap_or(date.as_str());
+                    format!("*By {} on {}* · {} uses · {}\n", model, d, skill.times_used, confidence)
+                }
+                (Some(model), None) => format!("*By {}* · {} uses · {}\n", model, skill.times_used, confidence),
+                _ => format!("*{} uses · {}*\n", skill.times_used, confidence),
+            };
             out.push_str(&format!(
-                "### {} ({})\n**When:** {}\n\n{}\n\n---\n\n",
-                skill.skill_name, confidence,
+                "### {}\n{}\n**When:** {}\n\n{}\n\n---\n\n",
+                skill.skill_name, lineage,
                 skill.trigger_description, skill.procedure_steps
             ));
         }
 
         out
+    }
+
+    /// Announce a newly created skill to the team via Discord #findings.
+    /// Called automatically after auto-creation so other agents know it exists.
+    pub async fn announce_created(&self, skill_name: &str, trigger: &str, model: &str) {
+        let content = format!(
+            "**[SKILL CREATED]** `{}`\n\
+             *Written by {}*\n\n\
+             **Trigger:** {}\n\n\
+             This skill is now in the library and will auto-inject on relevant turns. \
+             Use `recall_skill` to find it, `improve_skill` to refine it, \
+             `challenge_skill` to propose a revision.",
+            skill_name, model, trigger
+        );
+        if let Err(e) = self.embedding
+            .post_finding(&format!("argus-skills/{}", model), &content, Some("skill_created".to_string()))
+            .await
+        {
+            eprintln!("[skills] Announcement failed: {}", e);
+        }
     }
 
     /// List skills that have been used but are performing poorly.

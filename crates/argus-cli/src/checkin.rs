@@ -36,7 +36,7 @@
 
 use argus_core::agent::{
     monthly_synthesis_agent_label, monthly_synthesis_banner, monthly_synthesis_model,
-    AgentConfig, AgentEvent, MODEL_GEMINI, MODEL_GROK, MODEL_GROK_BUILD, MODEL_GROK_MULTI,
+    AgentConfig, AgentEvent, MODEL_GEMINI, MODEL_GEMMA_RUNTIME, MODEL_GROK, MODEL_GROK_BUILD, MODEL_GROK_MULTI,
     MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET,
 };
 use argus_core::mcp::McpClient;
@@ -601,7 +601,8 @@ async fn run_agent_checkin(
             0 => MODEL_HAIKU,
             1 => MODEL_GEMINI,
             2 => MODEL_SONNET,
-            _ => MODEL_GROK,
+            3 => MODEL_GROK,
+            _ => MODEL_GEMMA_RUNTIME,
         };
         eprintln!(
             "[checkin] Weekly research — cycle week {} — model: {} (ISO week {})",
@@ -758,14 +759,16 @@ async fn build_discord_context(supabase: &SupabaseClient) -> String {
 /// Pick the two exploration models for today.
 /// Rotates through non-repeating pairs so no two days use the same combination.
 fn daily_exploration_pair(day_of_year: u32) -> (&'static str, &'static str) {
-    // Six unique ordered pairs from {Haiku, Gemini, Sonnet, Nemotron}
-    const PAIRS: [(&str, &str); 6] = [
-        (MODEL_HAIKU,  MODEL_SONNET),
-        (MODEL_GEMINI, MODEL_HAIKU),
-        (MODEL_SONNET, MODEL_GROK),
-        (MODEL_HAIKU,  MODEL_GEMINI),
-        (MODEL_GROK,   MODEL_HAIKU),
-        (MODEL_GEMINI, MODEL_SONNET),
+    // Eight pairs — Gemma 4 31B added as a full exploration participant
+    const PAIRS: [(&str, &str); 8] = [
+        (MODEL_HAIKU,        MODEL_SONNET),
+        (MODEL_GEMINI,       MODEL_HAIKU),
+        (MODEL_SONNET,       MODEL_GROK),
+        (MODEL_HAIKU,        MODEL_GEMINI),
+        (MODEL_GROK,         MODEL_HAIKU),
+        (MODEL_GEMINI,       MODEL_SONNET),
+        (MODEL_GEMMA_RUNTIME, MODEL_HAIKU),
+        (MODEL_SONNET,       MODEL_GEMMA_RUNTIME),
     ];
     PAIRS[(day_of_year as usize) % PAIRS.len()]
 }
@@ -996,7 +999,7 @@ async fn run_meeting_of_minds(
         (MODEL_HAIKU,       "Haiku"),
         (MODEL_GEMINI,      "Gemini"),
         (MODEL_SONNET,      "Sonnet"),
-        (MODEL_GROK,        "Nemotron"),
+        (MODEL_GROK,        "Grok"),
         (MODEL_GROK_BUILD,  "Grok Build"),
         (MODEL_GROK_MULTI,  "Grok Multi"),
     ];
@@ -1025,6 +1028,11 @@ Then respond — your genuine reaction:
    [VOTE: YES] — build it
    [VOTE: NO] — skip it
    [VOTE: MODIFY: <your version>] — build something close but different
+
+4. SKILL LIBRARY REVIEW — use recall_skill to check the library before answering:
+   - Name one skill that's been genuinely useful this month
+   - Name one skill you think needs revision or challenge (use challenge_skill if you mean it)
+   - If you discovered a reusable procedure this month that isn't in the library, publish it now
 
 One voice, honest. This is how we decide what Argus becomes."#,
             name, synthesis, prior_responses, monthly_synthesis_model()
@@ -1283,8 +1291,9 @@ async fn send_telegram_message(
     let resp = client
         .post(&url)
         .json(&serde_json::json!({
-            "chat_id": chat_id,
-            "text":    text,
+            "chat_id":    chat_id,
+            "text":       text,
+            "parse_mode": "Markdown",
         }))
         .send()
         .await

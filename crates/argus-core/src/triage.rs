@@ -83,7 +83,7 @@ pub fn route_to_channel(post_type: &str, content: &str) -> &'static str {
         return "questions";
     }
     // Default
-    "ops"
+    "general"
 }
 
 // ── Injection scanner ──────────────────────────────────────────────────────

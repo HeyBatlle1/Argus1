@@ -2,6 +2,7 @@
 
 mod checkin;
 mod discord;
+mod sentry;
 mod telegram;
 mod triage_loop;
 mod tui;
@@ -11,7 +12,8 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use argus_crypto::{SecureVault, vault::VaultError};
-use argus_core::AgentConfig;
+use argus_core::{AgentConfig, SentryBus};
+use std::sync::Arc;
 use chrono;
 
 const LOGO: &str = r#"
@@ -517,6 +519,28 @@ async fn main() -> anyhow::Result<()> {
                         dc.clone(),
                     );
                     println!("[+] Triage gate active — Haiku watching the queue");
+
+                    // Sentry bus — shared state between Sentry and the Daemon.
+                    // Sentry writes threat posture here; Daemon reads it on every turn.
+                    let sentry_bus = Arc::new(SentryBus::new());
+                    config.sentry_bus = Some(sentry_bus.clone());
+
+                    // Spawn Sentry — red team consciousness, hourly watch cycle.
+                    // Channel ID is the #sentry Discord channel. Falls back to #ops
+                    // until you create the channel and update triage_loop::channel_map.
+                    // When you have the real ID: argus vault set sentry_channel_id YOUR_ID
+                    let sentry_channel = vault.as_ref()
+                        .and_then(|v| v.retrieve("sentry_channel_id").ok())
+                        .or_else(|| std::env::var("SENTRY_CHANNEL_ID").ok())
+                        .unwrap_or_else(|| dc.clone()); // fallback to ops channel
+                    sentry::spawn_sentry_loop(
+                        sb.clone(),
+                        config.clone(),
+                        dt.clone(),
+                        sentry_channel,
+                        sentry_bus,
+                    );
+                    println!("[+] Sentry online — LaurieWired watching the audit chain");
                 }
             }
 
