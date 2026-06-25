@@ -109,47 +109,58 @@ pub fn spawn_checkin_loop(
     });
 }
 
-/// Write a factual HANDOVER.md on daemon startup based on current workspace state.
-/// The interpretive sections (open items, start here) are left for the agent to fill via write_handover.
+/// Write a factual HANDOVER.md on daemon startup from what the daemon can see directly.
+/// Daemon has /workspace mounted — reads filesystem, no git needed (git lives in workspace container).
+/// Interpretive sections (open items, start here) are for the agent to fill via write_handover.
 async fn generate_startup_handover() {
-    use tokio::process::Command;
-    use tokio::time::{timeout, Duration};
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
 
-    async fn run(cmd: &str) -> String {
-        match timeout(Duration::from_secs(5), Command::new("sh").arg("-c").arg(cmd).output()).await {
-            Ok(Ok(o)) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-            _ => "(unavailable)".to_string(),
+    // Read existing HANDOVER.md — if agent wrote one last session, keep it and
+    // just prepend a "daemon restarted" notice rather than overwriting everything.
+    if let Ok(existing) = std::fs::read_to_string("/workspace/HANDOVER.md") {
+        if existing.contains("## Start here") && !existing.contains("fill this in") {
+            // Agent wrote a real handover last session — don't clobber it, just note the restart
+            let notice = format!("*Daemon restarted at {now}. Previous session handover preserved below.*\n\n");
+            let updated = format!("{}{}", notice, existing);
+            let _ = std::fs::write("/workspace/HANDOVER.md", &updated);
+            eprintln!("[handover] Previous session handover preserved — daemon restart noted");
+            return;
         }
     }
 
-    let git_log = run(
-        "cd /workspace && git log --oneline -10 2>/dev/null"
-    ).await;
-
-    let knowledge = run(
-        "ls /workspace/knowledge/ 2>/dev/null | sed 's/^/- /' || echo '(empty)'"
-    ).await;
-
-    let docs = run(
-        "ls /workspace/docs/ 2>/dev/null | sed 's/^/- /' || echo '(empty)'"
-    ).await;
-
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
+    // No agent handover exists — write a factual startup brief from filesystem state
+    let knowledge = list_dir("/workspace/knowledge");
+    let docs      = list_dir("/workspace/docs");
 
     let content = format!(
         "# Session Handover — {now}\n\
-         *Auto-generated at daemon startup. Agent: update open_items and start_here via write_handover.*\n\n\
-         ## Recent commits in /workspace\n```\n{git_log}\n```\n\n\
+         *Auto-generated at daemon startup — no agent close from previous session.*\n\
+         *Agent: fill in open_items and start_here via write_handover when closing.*\n\n\
          ## Knowledge base (/workspace/knowledge/)\n{knowledge}\n\n\
          ## Docs (/workspace/docs/)\n{docs}\n\n\
          ## Open items\n(Agent: fill this in with write_handover at session close)\n\n\
-         ## Start here\n(Agent: fill this in with write_handover at session close)\n"
+         ## Start here\n\
+         Check /workspace/knowledge/ for existing findings before searching Discord. \
+         Use git_checkpoint after any new work. Use write_handover before ending the session.\n"
     );
 
-    if let Err(e) = std::fs::write("/workspace/HANDOVER.md", &content) {
-        eprintln!("[handover] Failed to write startup handover: {}", e);
-    } else {
-        eprintln!("[handover] Startup handover written to /workspace/HANDOVER.md");
+    match std::fs::write("/workspace/HANDOVER.md", &content) {
+        Ok(_)  => eprintln!("[handover] Startup handover written to /workspace/HANDOVER.md"),
+        Err(e) => eprintln!("[handover] Could not write handover ({}). /workspace may not be mounted yet.", e),
+    }
+}
+
+fn list_dir(path: &str) -> String {
+    match std::fs::read_dir(path) {
+        Err(_) => "(empty or not found)".to_string(),
+        Ok(entries) => {
+            let mut names: Vec<String> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| format!("- {}", e.file_name().to_string_lossy()))
+                .collect();
+            names.sort();
+            if names.is_empty() { "(empty)".to_string() } else { names.join("\n") }
+        }
     }
 }
 
