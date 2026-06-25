@@ -69,6 +69,7 @@ impl SkillsClient {
         if query.split_whitespace().count() < 5 {
             return Ok(vec![]);
         }
+        tracing::debug!(query = %&query[..query.len().min(50)], "skill_search");
         let vector = self.embedding
             .embed(query)
             .await
@@ -93,6 +94,7 @@ impl SkillsClient {
     /// Store a new skill with its embedding.
     /// Called from the background reflection task after tool-heavy turns.
     pub async fn create_skill(&self, skill: NewSkill) -> Result<String, String> {
+        tracing::info!(name = %skill.skill_name, "skill_create");
         let embed_text = format!(
             "{}\n\n{}\n\n{}",
             skill.skill_name, skill.trigger_description, skill.procedure_steps
@@ -128,6 +130,7 @@ impl SkillsClient {
         success: bool,
         refined_steps: Option<&str>,
     ) -> Result<(), String> {
+        tracing::debug!(skill_id = %skill_id, success = %success, "skill_usage");
         let body = serde_json::json!({
             "skill_id": skill_id,
             "success": success,

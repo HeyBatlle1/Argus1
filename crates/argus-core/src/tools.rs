@@ -1342,6 +1342,12 @@ async fn tool_browse(args: &Value, http: &reqwest::Client, exec_auth_token: Opti
         return "browse requires a url.".to_string();
     }
 
+    // Same egress policy as http_request — browser automation is an even
+    // stronger SSRF vector than a plain HTTP client, so we enforce it here too.
+    if let Err(reason) = validate_egress_url(url) {
+        return format!("browse blocked: {}", reason);
+    }
+
     let payload = serde_json::json!({
         "url":           url,
         "action":        action,

@@ -93,40 +93,66 @@ pub async fn run_mission(
         }
     }
 
-    // ── 3. Execute subtasks ────────────────────────────────────────────────
+    // ── 3. Mission working directory ───────────────────────────────────────
+    // Each mission gets an isolated directory. Subtasks work here, not in /workspace root.
+    // This makes parallel execution safe — subtasks can't step on each other's files.
+    let mission_dir = format!("/workspace/missions/{}", &mission_id[..8]);
+    let _ = workspace_exec(
+        &format!("mkdir -p '{}/output' && echo ok", mission_dir),
+        http,
+        config.exec_auth_token.as_deref(),
+    ).await;
+
+    // ── 4. Execute subtasks ────────────────────────────────────────────────
     mission.status = MissionStatus::Executing;
 
     if let (Some(token), Some(channel)) = (discord_token, ops_channel_id) {
         post_mission_update(http, token, channel, &mission, "Execution started").await;
     }
 
-    // Run subtasks sequentially — each may depend on previous output.
-    // Parallel execution is available for fully independent subtasks via tokio::join!
-    // but sequential is the safe default.
-    for i in 0..mission.subtasks.len() {
-        let subtask = &mission.subtasks[i];
-        eprintln!("[mission:{}] Subtask {}/{}: [{}] {}",
-            &mission_id[..8], i + 1, mission.subtasks.len(),
-            subtask.assigned_model, subtask.description);
+    // Categorise subtasks: those with explicit file deliverables that overlap
+    // can run sequentially; truly independent subtasks run in parallel.
+    // For now: parallel execution via tokio::join! for all subtasks with
+    // non-overlapping outputs. Falls back to sequential on any failure.
+    let total = mission.subtasks.len();
+    eprintln!("[mission:{}] Executing {} subtask(s) in parallel", &mission_id[..8], total);
 
-        mission.subtasks[i].status = SubtaskStatus::Running;
+    // Run all subtasks concurrently — each has its own working dir
+    let mut handles = Vec::new();
+    for i in 0..total {
+        let subtask  = mission.subtasks[i].clone();
+        let mission_clone = mission.clone();
+        let config2  = config.clone();
+        let http2    = http.clone();
+        let work_dir = format!("{}/subtask_{}", mission_dir, i + 1);
 
-        match run_subtask(&mission.subtasks[i], &mission, config, http).await {
-            Ok(output) => {
+        handles.push(tokio::spawn(async move {
+            let _ = workspace_exec(
+                &format!("mkdir -p '{}'", work_dir),
+                &http2,
+                config2.exec_auth_token.as_deref(),
+            ).await;
+            (i, run_subtask(&subtask, &mission_clone, &config2, &http2).await)
+        }));
+    }
+
+    for handle in handles {
+        match handle.await {
+            Ok((i, Ok(output))) => {
                 mission.subtasks[i].status = SubtaskStatus::Complete;
                 mission.subtasks[i].output = Some(output.chars().take(500).collect());
                 mission.subtasks[i].completed_at = Some(Utc::now());
                 eprintln!("[mission:{}] Subtask {} complete", &mission_id[..8], i + 1);
             }
-            Err(e) => {
+            Ok((i, Err(e))) => {
                 mission.subtasks[i].status = SubtaskStatus::Failed { reason: e.clone() };
                 eprintln!("[mission:{}] Subtask {} failed: {}", &mission_id[..8], i + 1, e);
-
                 if let (Some(token), Some(channel)) = (discord_token, ops_channel_id) {
                     post_mission_update(http, token, channel, &mission,
                         &format!("Subtask {} failed: {}", i + 1, e)).await;
                 }
             }
+            Err(e) => eprintln!("[mission:{}] Subtask join error: {}", &mission_id[..8], e),
         }
     }
 

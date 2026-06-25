@@ -69,6 +69,8 @@ enum Commands {
     Discord,
     /// Run in daemon mode
     Daemon,
+    /// Health check — shows system status without starting anything
+    Doctor,
 }
 
 #[derive(Subcommand)]
@@ -122,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let vault_file = vault_path();
-    let mut vault = if matches!(cli.command, Some(Commands::Daemon)) {
+    let mut vault = if matches!(cli.command, Some(Commands::Daemon) | Some(Commands::Doctor)) {
         // Daemon tries vault but doesn't fail — falls back to env vars (needed in Docker/Linux)
         if vault_file.exists() {
             let mut v = SecureVault::new(vault_file.clone());
@@ -624,6 +626,59 @@ async fn main() -> anyhow::Result<()> {
             println!("[+] Daemon running (Ctrl+C to stop)");
             tokio::signal::ctrl_c().await?;
             println!("Daemon stopped");
+        }
+
+        Some(Commands::Doctor) => {
+            println!("{}", LOGO);
+            println!("  ARGUS DOCTOR — system health check\n  ─────────────────────────────────────────\n");
+
+            let vault = vault.as_mut().unwrap();
+            let mut ok = true;
+            let mut check = |label: &str, result: bool, note: &str| {
+                let icon = if result { "  ✅" } else { "  ❌" };
+                println!("{} {} {}", icon, label, if note.is_empty() { String::new() } else { format!("— {}", note) });
+                if !result { ok = false; }
+            };
+
+            // Vault
+            let has_openrouter = vault.retrieve("openrouter_api_key").is_ok();
+            check("OpenRouter API key", has_openrouter, "");
+
+            let has_telegram = vault.retrieve("telegram_bot_token").is_ok();
+            check("Telegram bot token", has_telegram, if has_telegram { "" } else { "optional — Telegram bot disabled" });
+
+            let has_discord = vault.retrieve("discord_bot_token").is_ok();
+            check("Discord bot token", has_discord, if has_discord { "" } else { "optional — Discord intranet disabled" });
+
+            let has_supabase = vault.retrieve("supabase_argus_url").is_ok()
+                && vault.retrieve("supabase_argus_service_key").is_ok();
+            check("Supabase (Argus project)", has_supabase,
+                if has_supabase { "" } else { "semantic memory, missions, skills will not persist" });
+
+            let has_brave = vault.retrieve("brave_search_api_key").is_ok();
+            check("Brave Search API key", has_brave, if has_brave { "" } else { "optional — web_search disabled" });
+
+            let has_github = vault.retrieve("github_token").is_ok();
+            check("GitHub token", has_github, if has_github { "" } else { "optional — workspace git backup disabled" });
+
+            // Binary
+            let binary = std::path::Path::new("/Users/burtonstuff/Argus1/target/release/argus").exists();
+            check("Release binary built", binary, if binary { "" } else { "run: cargo build --release" });
+
+            // Workspace files
+            let handover = std::path::Path::new("/workspace/HANDOVER.md").exists();
+            check("HANDOVER.md", handover, if handover { "" } else { "daemon not running or /workspace not mounted" });
+
+            let mission_dir = std::path::Path::new("/workspace/missions").exists();
+            check("Mission working dirs", mission_dir, if mission_dir { "" } else { "created on first mission run" });
+
+            println!("\n  ─────────────────────────────────────────");
+            if ok {
+                println!("  All systems nominal. Run ./argus-up.sh to start.");
+            } else {
+                println!("  Some checks failed. Review above and fix before starting.");
+            }
+            println!();
         }
     }
 
