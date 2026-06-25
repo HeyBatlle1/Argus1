@@ -389,7 +389,15 @@ pub async fn execute_builtin(
     current_model: &str,
     supabase_url: Option<&str>,
     supabase_jwt: Option<&str>,
+    mission_executor: Option<&std::sync::Arc<dyn crate::agent::MissionExecutor>>,
 ) -> Option<String> {
+    // Mission tools dispatch — handled by argus-missions via injected executor
+    if matches!(name, "start_mission" | "mission_status" | "list_missions" | "add_subtask") {
+        if let Some(exec) = mission_executor {
+            return exec.execute(name, args, current_model).await;
+        }
+        return Some("Mission tools not available — mission executor not configured.".to_string());
+    }
     match name {
         "read_file"      => Some(tool_read_file(args)),
         "list_directory" => Some(tool_list_directory(args)),

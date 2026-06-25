@@ -1,0 +1,16 @@
+[package]
+name = "argus-missions"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+argus-core  = { path = "../argus-core" }
+argus-audit = { path = "../argus-audit" }
+tokio       = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+reqwest     = { workspace = true }

@@ -8,6 +8,8 @@ mod triage_loop;
 mod tui;
 mod web;
 
+use argus_missions::{MissionBridge, MissionRegistry};
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -495,6 +497,26 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             config.audit = audit_arc;
+
+            // ── Mission suite ──────────────────────────────────────────────
+            // Create MissionRegistry + MissionBridge, inject into AgentConfig.
+            // All models get access; Grok Build executes by default.
+            // Sentry gates every plan before it runs.
+            {
+                let registry = std::sync::Arc::new(MissionRegistry::new());
+                let ops_channel = "1496620295316832507".to_string(); // #ops
+                let bridge = MissionBridge {
+                    registry: registry.clone(),
+                    config: config.clone(),
+                    sentry_bus: config.sentry_bus.clone(),
+                    supabase: supabase_client.clone(),
+                    http: reqwest::Client::new(),
+                    discord_token: config.discord_bot_token.clone(),
+                    ops_channel_id: Some(ops_channel),
+                };
+                config.mission_executor = Some(std::sync::Arc::new(bridge));
+                println!("[+] Mission suite active — start_mission available to all agents");
+            }
 
             // ── Session handover ───────────────────────────────────────────
             // Write a factual startup brief to /workspace/HANDOVER.md, then

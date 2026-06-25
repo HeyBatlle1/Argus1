@@ -3,6 +3,17 @@
 use crate::mcp::McpClient;
 use crate::sentry_bus::SentryBus;
 use crate::shell::ShellPolicy;
+
+/// Trait for executing mission tools without a circular crate dependency.
+/// Implemented in argus-missions, injected via AgentConfig.
+pub trait MissionExecutor: Send + Sync {
+    fn execute<'a>(
+        &'a self,
+        name: &'a str,
+        args: &'a serde_json::Value,
+        model: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>;
+}
 use crate::tools::{self, MemoryBackend};
 use crate::embedding::EmbeddingClient;
 use crate::shell::PermissionPrompter;
@@ -532,6 +543,9 @@ pub struct AgentConfig {
     /// Injected at the top of every turn so the agent wakes up knowing
     /// exactly what was committed, what's open, and where to start.
     pub handover: Option<String>,
+    /// Mission executor — injected from argus-cli to avoid circular deps.
+    /// When set, mission tools (start_mission, mission_status, etc.) are dispatched here.
+    pub mission_executor: Option<Arc<dyn MissionExecutor>>,
 }
 
 impl AgentConfig {
@@ -558,6 +572,7 @@ impl AgentConfig {
             system_prompt_override: None,
             sentry_bus: None,
             handover: None,
+            mission_executor: None,
         }
     }
 
@@ -937,7 +952,7 @@ where
                 }
                 out
             } else if let Some(output) =
-                tools::execute_builtin(name, &args, shell_policy, memory, http_client, config.brave_search_key.as_deref(), config.shell_prompter.clone(), config.exec_auth_token.as_deref(), config.sonnet_guard.clone(), config.discord_bot_token.as_deref(), config.discord_channel_id, config.skills.as_ref(), &config.model, config.supabase_url.as_deref(), config.supabase_jwt.as_deref()).await
+                tools::execute_builtin(name, &args, shell_policy, memory, http_client, config.brave_search_key.as_deref(), config.shell_prompter.clone(), config.exec_auth_token.as_deref(), config.sonnet_guard.clone(), config.discord_bot_token.as_deref(), config.discord_channel_id, config.skills.as_ref(), &config.model, config.supabase_url.as_deref(), config.supabase_jwt.as_deref(), config.mission_executor.as_ref()).await
             {
                 output
             } else {
