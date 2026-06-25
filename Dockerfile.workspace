@@ -1,39 +1,97 @@
-# Argus Workspace - fat dev container for safe code execution
-# The daemon container execs commands into this container via docker exec
+# Argus Workspace — full-capability dev container for serious work
+# Agents can build anything here: web scraping, data analysis, browser automation,
+# compiled code, network research. If Manus can do it, we can do it better.
 FROM debian:bookworm-slim
 
-# Install core dev tools
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# ── Core system tools ──────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y \
-    # Build essentials
-    build-essential git curl wget \
+    build-essential git curl wget unzip jq \
+    ca-certificates gnupg lsb-release \
+    # Network/security tools
+    nmap netcat-openbsd dnsutils whois \
+    # File handling
+    file zip unzip p7zip-full \
     # Python
-    python3 python3-pip python3-venv \
-    # Node.js (via nodesource)
-    ca-certificates gnupg \
+    python3 python3-pip python3-venv python3-dev \
+    # System libs needed by browsers and data tools
+    libssl-dev libffi-dev libxml2-dev libxslt1-dev \
+    libjpeg-dev libpng-dev zlib1g-dev \
+    # Browser dependencies (Playwright/Chromium)
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+    libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 \
+    libatspi2.0-0 libxshmfence1 fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20 LTS
+# ── Node.js 20 LTS ────────────────────────────────────────────────────────
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Rust (rustup)
+# ── Rust ──────────────────────────────────────────────────────────────────
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install Go
+# ── Go ────────────────────────────────────────────────────────────────────
 RUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xzf -
 ENV PATH="/usr/local/go/bin:${PATH}"
 
-# Create workspace directory (shared volume mount point)
-RUN mkdir -p /workspace && chmod 777 /workspace
+# ── Python — full science, scraping, and browser stack ────────────────────
+RUN pip3 install --no-cache-dir --break-system-packages \
+    # HTTP and scraping
+    requests httpx aiohttp \
+    beautifulsoup4 lxml html5lib \
+    scrapy \
+    # Browser automation — the Manus layer
+    playwright \
+    selenium \
+    # Data science
+    numpy pandas scipy matplotlib seaborn \
+    # Image processing
+    Pillow \
+    # NLP and ML utilities
+    tiktoken \
+    # Document parsing
+    pypdf2 python-docx openpyxl \
+    # Security and crypto
+    cryptography pycryptodome \
+    # CLI and utils
+    rich click typer \
+    # API and REST
+    fastapi uvicorn pydantic \
+    # Git and version control
+    gitpython \
+    # Argus-specific
+    mcp
+
+# ── Playwright browsers ────────────────────────────────────────────────────
+# Chromium is the primary browser — used for web research, scraping dynamic pages,
+# form filling, screenshot capture, and anything that needs a real browser.
+RUN python3 -m playwright install chromium \
+    && python3 -m playwright install-deps chromium
+
+# ── Node.js global tools ───────────────────────────────────────────────────
+RUN npm install -g \
+    typescript ts-node \
+    prettier eslint \
+    # Puppeteer as a JS alternative to Playwright
+    puppeteer
+
+# ── Workspace setup ────────────────────────────────────────────────────────
+RUN mkdir -p /workspace/public /workspace/knowledge /workspace/docs && \
+    chmod 777 /workspace
+
 WORKDIR /workspace
 
-# Exec server and workspace init script
+# ── Exec server ───────────────────────────────────────────────────────────
 COPY workspace_exec_server.py /workspace_exec_server.py
 COPY workspace-init.sh /workspace-init.sh
 RUN chmod +x /workspace-init.sh
 
-EXPOSE 9001
-# Init script sets up git + MISSION.md then execs the exec server
+EXPOSE 9001 8081
+
 CMD ["/workspace-init.sh"]

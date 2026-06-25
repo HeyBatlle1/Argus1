@@ -6,7 +6,7 @@ use crate::shell::{ShellPolicy, PermissionPrompter, PermissionRequest, Permissio
 use crate::skills::{NewSkill, SkillsClient};
 use serde_json::Value;
 
-const MAX_FILE_CHARS: usize = 8_000;
+const MAX_FILE_CHARS: usize = 24_000; // ~6k tokens — enough for serious files without overflow
 const MAX_DIR_ENTRIES: usize = 200;
 const MAX_SEARCH_RESULTS: usize = 6;
 
@@ -16,11 +16,13 @@ pub fn builtin_tool_schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read the contents of a file from the filesystem. Output capped at 8000 chars.",
+                "description": "Read the contents of a file. Supports large files via pagination — if the file is truncated, re-call with offset set to the value shown at the end of the output.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "The path to the file to read" }
+                        "path":   { "type": "string", "description": "Path to the file" },
+                        "offset": { "type": "number", "description": "Character offset to start reading from (for large files — use value from previous read)" },
+                        "limit":  { "type": "number", "description": "Max characters to read (default and max: 24000)" }
                     },
                     "required": ["path"]
                 }
@@ -206,6 +208,27 @@ pub fn builtin_tool_schemas() -> Vec<Value> {
                     "properties": {
                         "limit": { "type": "number", "description": "Number of recent messages to retrieve (default 15, max 20 — hard capped to protect context)" }
                     }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browse",
+                "description": "Open a real browser (Playwright/Chromium) and interact with a live webpage. Use for dynamic pages that http_request can't handle — JavaScript-heavy sites, SPAs, pages requiring login state, screenshots, form interaction. More powerful than http_request but slower.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url":           { "type": "string", "description": "URL to navigate to" },
+                        "action":        { "type": "string", "enum": ["fetch", "screenshot", "extract", "interact"], "description": "fetch=get page text, screenshot=capture image, extract=get specific element, interact=click/fill/evaluate" },
+                        "selector":      { "type": "string", "description": "CSS selector for extract action" },
+                        "click":         { "type": "string", "description": "CSS selector to click (interact action)" },
+                        "fill_selector": { "type": "string", "description": "CSS selector of input to fill (interact action)" },
+                        "fill_value":    { "type": "string", "description": "Value to fill into the input" },
+                        "script":        { "type": "string", "description": "JavaScript to evaluate on the page" },
+                        "timeout":       { "type": "number", "description": "Timeout in seconds (default 30)" }
+                    },
+                    "required": ["url"]
                 }
             }
         },
@@ -416,6 +439,7 @@ pub async fn execute_builtin(
         "publish_skill"   => Some(tool_publish_skill(args, skills, current_model).await),
         "recall_skill"    => Some(tool_recall_skill(args, skills).await),
         "improve_skill"   => Some(tool_improve_skill(args, skills).await),
+        "browse"          => Some(tool_browse(args, http_client, exec_auth_token).await),
         "write_handover"  => Some(tool_write_handover(args, http_client, exec_auth_token).await),
         "git_checkpoint"  => Some(tool_git_checkpoint(args, http_client, exec_auth_token).await),
         "challenge_skill" => Some(tool_challenge_skill(args, skills, current_model).await),
@@ -459,13 +483,36 @@ pub struct MemoryRecord {
 // ---------------------------------------------------------------------------
 
 fn tool_read_file(args: &Value) -> String {
-    let path = args["path"].as_str().unwrap_or("");
+    let path   = args["path"].as_str().unwrap_or("");
+    let offset = args["offset"].as_u64().unwrap_or(0) as usize; // char offset to start from
+    let limit  = args["limit"].as_u64()
+        .map(|l| l as usize)
+        .unwrap_or(MAX_FILE_CHARS)
+        .min(MAX_FILE_CHARS);
+
     match std::fs::read_to_string(path) {
         Ok(content) => {
-            if content.chars().count() > MAX_FILE_CHARS {
-                format!("{}...\n[truncated, {} bytes total]", content.chars().take(MAX_FILE_CHARS).collect::<String>(), content.len())
+            let total_chars = content.chars().count();
+            let total_bytes = content.len();
+
+            if total_chars <= limit && offset == 0 {
+                // File fits in one read
+                return content;
+            }
+
+            // Paginated read
+            let chars: Vec<char> = content.chars().skip(offset).take(limit).collect();
+            let chunk: String = chars.into_iter().collect();
+            let read_to = offset + chunk.chars().count();
+            let remaining = total_chars.saturating_sub(read_to);
+
+            if remaining > 0 {
+                format!(
+                    "{}\n\n[File continues — {} chars remaining. Read again with offset:{}]",
+                    chunk, remaining, read_to
+                )
             } else {
-                content
+                format!("{}\n\n[End of file — {} total bytes]", chunk, total_bytes)
             }
         }
         Err(e) => format!("Error reading file: {}", e),
@@ -1283,6 +1330,70 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         }
     }
     Ok(out)
+}
+
+// ── Browser ────────────────────────────────────────────────────────────────
+
+async fn tool_browse(args: &Value, http: &reqwest::Client, exec_auth_token: Option<&str>) -> String {
+    let url    = args["url"].as_str().unwrap_or("").trim();
+    let action = args["action"].as_str().unwrap_or("fetch");
+
+    if url.is_empty() {
+        return "browse requires a url.".to_string();
+    }
+
+    let payload = serde_json::json!({
+        "url":           url,
+        "action":        action,
+        "selector":      args["selector"].as_str().unwrap_or("body"),
+        "click":         args["click"].as_str(),
+        "fill_selector": args["fill_selector"].as_str(),
+        "fill_value":    args["fill_value"].as_str(),
+        "script":        args["script"].as_str(),
+        "timeout":       args["timeout"].as_u64().unwrap_or(30),
+    });
+
+    let mut req = http
+        .post("http://argus-workspace:9001/browse")
+        .json(&payload)
+        .timeout(std::time::Duration::from_secs(60));
+    if let Some(token) = exec_auth_token {
+        req = req.header("X-Argus-Auth", token);
+    }
+
+    match req.send().await {
+        Err(e) => format!("Browser unreachable: {} — is the workspace running?", e),
+        Ok(r) => match r.json::<serde_json::Value>().await {
+            Err(e) => format!("Browser response error: {}", e),
+            Ok(json) => {
+                if let Some(err) = json["error"].as_str().filter(|s| !s.is_empty()) {
+                    return format!("Browser error: {}", err);
+                }
+                let title   = json["title"].as_str().unwrap_or("(no title)");
+                let final_url = json["url"].as_str().unwrap_or(url);
+                let content = json["content"].as_str().unwrap_or("(no content)");
+                let screenshot = json["screenshot"].as_str();
+
+                if action == "screenshot" && screenshot.is_some() {
+                    let path = format!("/workspace/public/screenshot_{}.png",
+                        chrono::Utc::now().timestamp());
+                    // Save to workspace public dir via shell
+                    let save_cmd = format!(
+                        "python3 -c \"import base64; open('{}', 'wb').write(base64.b64decode('{}'))\"",
+                        path, screenshot.unwrap()
+                    );
+                    let _ = http.post("http://argus-workspace:9001/exec")
+                        .json(&serde_json::json!({"command": save_cmd}))
+                        .send().await;
+                    format!("Screenshot saved to {}\nViewable at http://localhost:8081/{}\nTitle: {} | URL: {}",
+                        path, path.replace("/workspace/public/", ""),
+                        title, final_url)
+                } else {
+                    format!("**{}**\nURL: {}\n\n{}", title, final_url, content)
+                }
+            }
+        }
+    }
 }
 
 // ── Handover ───────────────────────────────────────────────────────────────

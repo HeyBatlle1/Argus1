@@ -499,11 +499,21 @@ async fn main() -> anyhow::Result<()> {
             config.audit = audit_arc;
 
             // ── Mission suite ──────────────────────────────────────────────
-            // Create MissionRegistry + MissionBridge, inject into AgentConfig.
+            // MissionRegistry backed by Supabase — missions survive daemon restarts.
             // All models get access; Grok Build executes by default.
             // Sentry gates every plan before it runs.
             {
-                let registry = std::sync::Arc::new(MissionRegistry::new());
+                let registry = std::sync::Arc::new(match &supabase_client {
+                    Some(sb) => MissionRegistry::with_supabase(sb.clone()),
+                    None     => MissionRegistry::new(),
+                });
+
+                // Restore any active missions from previous sessions
+                let registry_restore = registry.clone();
+                tokio::spawn(async move {
+                    registry_restore.restore_from_supabase().await;
+                });
+
                 let ops_channel = "1496620295316832507".to_string(); // #ops
                 let bridge = MissionBridge {
                     registry: registry.clone(),
@@ -515,7 +525,7 @@ async fn main() -> anyhow::Result<()> {
                     ops_channel_id: Some(ops_channel),
                 };
                 config.mission_executor = Some(std::sync::Arc::new(bridge));
-                println!("[+] Mission suite active — start_mission available to all agents");
+                println!("[+] Mission suite active — Supabase-backed, survives restarts");
             }
 
             // ── Session handover ───────────────────────────────────────────

@@ -112,6 +112,8 @@ class ExecHandler(BaseHTTPRequestHandler):
             self._handle_exec()
         elif self.path == '/run':
             self._handle_run()
+        elif self.path == '/browse':
+            self._handle_browse()
         else:
             self.send_response(404)
             self.end_headers()
@@ -177,6 +179,127 @@ class ExecHandler(BaseHTTPRequestHandler):
             pass
 
         self._respond(200, result)
+
+
+    def _handle_browse(self):
+        """Browser automation via Playwright.
+
+        POST /browse  {
+          "url": "https://example.com",
+          "action": "fetch" | "screenshot" | "extract" | "interact",
+          "selector": "optional CSS selector for extract/interact",
+          "script": "optional JS to evaluate",
+          "click": "optional selector to click",
+          "timeout": 30
+        }
+
+        Returns: { "content": str, "screenshot": base64|null, "title": str, "url": str }
+        """
+        if not self._auth():
+            return
+        try:
+            body    = self._read_body()
+            url     = body.get('url', '').strip()
+            action  = body.get('action', 'fetch').lower()
+            timeout = int(body.get('timeout', 30)) * 1000  # Playwright uses ms
+        except Exception as e:
+            self._respond(400, {'error': str(e)})
+            return
+
+        if not url:
+            self._respond(400, {'error': 'url required'})
+            return
+
+        try:
+            from playwright.sync_api import sync_playwright
+            import base64
+
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox',
+                          '--disable-dev-shm-usage', '--disable-gpu']
+                )
+                page = browser.new_page(
+                    user_agent='Mozilla/5.0 (compatible; Argus/1.0; Research Agent)'
+                )
+                page.set_default_timeout(timeout)
+
+                try:
+                    page.goto(url, wait_until='domcontentloaded')
+                except Exception:
+                    pass  # Some pages block or timeout — get what we can
+
+                result = {
+                    'url':   page.url,
+                    'title': page.title(),
+                    'content': None,
+                    'screenshot': None,
+                    'error': None,
+                }
+
+                if action == 'screenshot':
+                    png = page.screenshot(full_page=True)
+                    result['screenshot'] = base64.b64encode(png).decode()
+                    result['content'] = f"Screenshot taken ({len(png)} bytes)"
+
+                elif action == 'extract':
+                    selector = body.get('selector', 'body')
+                    try:
+                        el = page.locator(selector).first
+                        result['content'] = el.inner_text()[:8000]
+                    except Exception as e:
+                        result['content'] = page.inner_text('body')[:8000]
+
+                elif action == 'interact':
+                    # Click a selector, optionally fill, then get resulting content
+                    click_sel = body.get('click', '')
+                    fill_sel  = body.get('fill_selector', '')
+                    fill_val  = body.get('fill_value', '')
+                    script    = body.get('script', '')
+
+                    if click_sel:
+                        try:
+                            page.click(click_sel)
+                            page.wait_for_load_state('networkidle', timeout=5000)
+                        except Exception:
+                            pass
+                    if fill_sel and fill_val:
+                        try:
+                            page.fill(fill_sel, fill_val)
+                        except Exception:
+                            pass
+                    if script:
+                        try:
+                            ev = page.evaluate(script)
+                            result['content'] = str(ev)
+                        except Exception as e:
+                            result['error'] = str(e)
+                    if not result['content']:
+                        result['content'] = page.inner_text('body')[:8000]
+
+                else:  # fetch — default
+                    script = body.get('script', '')
+                    if script:
+                        try:
+                            ev = page.evaluate(script)
+                            result['content'] = str(ev)[:8000]
+                        except Exception:
+                            pass
+                    if not result['content']:
+                        # Get main text content, strip scripts/styles
+                        result['content'] = page.evaluate("""() => {
+                            document.querySelectorAll('script,style,nav,footer,aside').forEach(e=>e.remove());
+                            return document.body ? document.body.innerText : document.documentElement.innerText;
+                        }""")[:8000]
+
+                browser.close()
+                self._respond(200, result)
+
+        except ImportError:
+            self._respond(500, {'error': 'Playwright not installed. Run: python3 -m playwright install chromium'})
+        except Exception as e:
+            self._respond(500, {'error': f'Browser error: {str(e)}'})
 
 
 def start_file_server():

@@ -135,6 +135,23 @@ else
     fi
 fi
 
+# ── Workspace git remote ─────────────────────────────────────────────────────
+# Push /workspace commits to HeyBatlle1/argus-workspace so they survive volume loss.
+# If the repo doesn't exist on GitHub yet, agents can create it via the GitHub MCP.
+if [ -d "$WORKSPACE/.git" ] && [ -n "$GITHUB_TOKEN" ]; then
+    REMOTE=$(git -C "$WORKSPACE" remote get-url origin 2>/dev/null)
+    if [ -z "$REMOTE" ]; then
+        git -C "$WORKSPACE" remote add origin \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/HeyBatlle1/argus-workspace.git" 2>/dev/null \
+            && echo "[workspace-init] Workspace remote added: HeyBatlle1/argus-workspace" \
+            || echo "[workspace-init] Remote add skipped"
+    fi
+    # Try to push — silently skip if repo doesn't exist yet
+    git -C "$WORKSPACE" push -u origin HEAD 2>/dev/null \
+        && echo "[workspace-init] Workspace synced to GitHub" \
+        || echo "[workspace-init] GitHub push skipped (repo may not exist yet — agents can create it)"
+fi
+
 # ── Security: CVE-2026-48710 pip install guard ────────────────────────────────
 # BadHost: host-header injection in Starlette < 1.0.1 bypasses path-based auth.
 # Affects fastapi, litellm, vllm, and any package that pulls the vulnerable ASGI stack.

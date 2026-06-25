@@ -62,6 +62,7 @@ TOOLS:
 • run_node — execute Node.js/JavaScript code in the sandbox, returns stdout/stderr
 • web_search — current information from the web via Brave Search
 • http_request — call any API or web endpoint
+• browse — real Chromium browser for dynamic pages, screenshots, form interaction
 • remember, recall, forget — persistent memory across sessions
 • publish_skill, recall_skill, improve_skill — shared procedural skill library
 • list_tools — see every tool available in this session

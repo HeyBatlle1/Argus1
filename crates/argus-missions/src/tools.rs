@@ -12,37 +12,110 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use reqwest::Client;
 
-/// Global in-process mission registry.
-/// In production this would be backed by Supabase. For now it's in-memory.
+/// Mission registry — in-memory with Supabase persistence.
+/// Missions survive daemon restarts. Active missions are reloaded on startup.
 pub struct MissionRegistry {
     missions: Mutex<HashMap<String, Mission>>,
+    supabase: Option<SupabaseClient>,
 }
 
 impl MissionRegistry {
     pub fn new() -> Self {
-        Self { missions: Mutex::new(HashMap::new()) }
+        Self { missions: Mutex::new(HashMap::new()), supabase: None }
+    }
+
+    pub fn with_supabase(supabase: SupabaseClient) -> Self {
+        Self { missions: Mutex::new(HashMap::new()), supabase: Some(supabase) }
     }
 
     pub fn insert(&self, mission: Mission) {
         if let Ok(mut m) = self.missions.lock() {
-            m.insert(mission.id.to_string(), mission);
+            m.insert(mission.id.to_string(), mission.clone());
         }
+        self.persist_async(mission);
     }
 
     pub fn get(&self, id: &str) -> Option<Mission> {
-        self.missions.lock().ok()?.get(id).cloned()
+        let map = self.missions.lock().ok()?;
+        // Try full ID first, then prefix match
+        map.get(id).cloned()
+            .or_else(|| map.values().find(|m| m.id.to_string().starts_with(id)).cloned())
     }
 
     pub fn update(&self, mission: Mission) {
         if let Ok(mut m) = self.missions.lock() {
-            m.insert(mission.id.to_string(), mission);
+            m.insert(mission.id.to_string(), mission.clone());
         }
+        self.persist_async(mission);
     }
 
     pub fn list_active(&self) -> Vec<Mission> {
         self.missions.lock()
             .map(|m| m.values().filter(|m| !m.is_terminal()).cloned().collect())
             .unwrap_or_default()
+    }
+
+    pub fn list_all(&self) -> Vec<Mission> {
+        self.missions.lock()
+            .map(|m| m.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Restore active missions from Supabase on daemon startup.
+    pub async fn restore_from_supabase(&self) {
+        let sb = match &self.supabase {
+            Some(sb) => sb.clone(),
+            None => return,
+        };
+        match sb.load_active_missions().await {
+            Ok(rows) => {
+                let mut count = 0;
+                if let Ok(mut map) = self.missions.lock() {
+                    for row in rows {
+                        if let Ok(mission) = serde_json::from_value::<Mission>(row) {
+                            map.insert(mission.id.to_string(), mission);
+                            count += 1;
+                        }
+                    }
+                }
+                if count > 0 {
+                    eprintln!("[missions] Restored {} active mission(s) from Supabase", count);
+                }
+            }
+            Err(e) => eprintln!("[missions] Failed to restore from Supabase: {}", e),
+        }
+    }
+
+    fn persist_async(&self, mission: Mission) {
+        if let Some(sb) = self.supabase.clone() {
+            tokio::spawn(async move {
+                // Serialize mission as JSON, flattening status to a string for the DB
+                let status_str = match &mission.status {
+                    MissionStatus::Planning       => "planning",
+                    MissionStatus::SentryReview   => "sentry_review",
+                    MissionStatus::SentryHold{..} => "sentry_hold",
+                    MissionStatus::Executing      => "executing",
+                    MissionStatus::Verifying      => "verifying",
+                    MissionStatus::Complete{..}   => "complete",
+                    MissionStatus::Failed{..}     => "failed",
+                };
+                let row = serde_json::json!({
+                    "id":               mission.id.to_string(),
+                    "objective":        mission.objective,
+                    "created_by":       mission.created_by,
+                    "primary_executor": mission.primary_executor,
+                    "status":           status_str,
+                    "subtasks":         serde_json::to_value(&mission.subtasks).unwrap_or_default(),
+                    "deliverables":     serde_json::to_value(&mission.deliverables).unwrap_or_default(),
+                    "verification":     serde_json::to_value(&mission.verification).unwrap_or_default(),
+                    "created_at":       mission.created_at.to_rfc3339(),
+                    "completed_at":     mission.completed_at.map(|t| t.to_rfc3339()),
+                });
+                if let Err(e) = sb.upsert_mission(&row).await {
+                    eprintln!("[missions] Supabase persist failed: {}", e);
+                }
+            });
+        }
     }
 }
 

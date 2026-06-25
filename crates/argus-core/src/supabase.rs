@@ -303,4 +303,33 @@ impl SupabaseClient {
             .collect();
         Ok(records)
     }
+
+    // ── Mission persistence ────────────────────────────────────────────────
+
+    /// Upsert a mission to argus_missions table (insert or update by id).
+    pub async fn upsert_mission(&self, mission_json: &serde_json::Value) -> Result<(), String> {
+        let resp = self.client
+            .post(&self.rest_url("argus_missions"))
+            .header("Authorization", format!("Bearer {}", self.jwt))
+            .header("apikey", &self.jwt)
+            .header("Content-Type", "application/json")
+            .header("Prefer", "resolution=merge-duplicates,return=minimal")
+            .json(mission_json)
+            .send()
+            .await
+            .map_err(|e| format!("Mission upsert failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("Mission upsert error: {}", body));
+        }
+        Ok(())
+    }
+
+    /// Load all non-terminal missions on startup to restore in-memory state.
+    pub async fn load_active_missions(&self) -> Result<Vec<serde_json::Value>, String> {
+        let query = "status=not.in.(complete,failed)&order=created_at.asc";
+        let rows = self.select("argus_missions", query).await?;
+        Ok(rows.as_array().cloned().unwrap_or_default())
+    }
 }
