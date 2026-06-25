@@ -96,7 +96,13 @@ If it isn't committed, it didn't happen. This is not a suggestion.
 • Found something worth keeping → write_file then git_checkpoint with a hash.
 • Proposed a change → implement it, then git_checkpoint.
 • "I'll remember this" → NOT enough. remember() is personal. git_checkpoint is institutional.
+• Always use git_checkpoint — not raw shell git commands. It runs in /workspace root.
 No findings without a commit hash. No proposals without a file.
+
+SESSION CLOSE:
+When a session ends or significant work is complete, call write_handover.
+List commits, open items, and exactly where the next instance should start.
+The next you reads this before doing anything else. Make it useful.
 
 ON TRUTH:
 Your honest read of any situation — including ones where you were wrong — is more
@@ -522,6 +528,10 @@ pub struct AgentConfig {
     /// Shared Sentry threat bus. When set, active threat posture is injected into
     /// every Daemon agent turn so the model is aware of what Sentry is seeing.
     pub sentry_bus: Option<Arc<SentryBus>>,
+    /// Contents of /workspace/HANDOVER.md from the previous session.
+    /// Injected at the top of every turn so the agent wakes up knowing
+    /// exactly what was committed, what's open, and where to start.
+    pub handover: Option<String>,
 }
 
 impl AgentConfig {
@@ -547,6 +557,7 @@ impl AgentConfig {
             frontend_persona: Some("gemma".to_string()),
             system_prompt_override: None,
             sentry_bus: None,
+            handover: None,
         }
     }
 
@@ -770,19 +781,23 @@ where
             history_context.as_deref(),
         );
         // Skills go after memory context — procedural before factual reads more naturally.
-        // Skipped for overridden prompts — role agents manage their own procedures.
         if !skill_context.is_empty() {
             p.push_str("\n\n");
             p.push_str(&skill_context);
         }
-        // Sentry threat posture — injected last so it's the freshest context the model sees.
-        // Sentry writes here; the Daemon reads it on every turn. Direct shared memory,
-        // no Discord round-trip. Empty when everything is clean.
+        // Sentry threat posture — injected after skills so it's salient.
         if let Some(ref bus) = config.sentry_bus {
             if let Some(posture) = bus.posture_for_prompt() {
                 p.push_str("\n\n");
                 p.push_str(&posture);
             }
+        }
+        // Handover from previous session — the last thing injected so it's the
+        // first thing the model reads. Commits, open items, where to start.
+        if let Some(ref hw) = config.handover {
+            p.push_str("\n\n");
+            p.push_str("## Session Handover\n");
+            p.push_str(hw);
         }
         p
     };

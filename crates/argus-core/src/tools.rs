@@ -212,6 +212,24 @@ pub fn builtin_tool_schemas() -> Vec<Value> {
         {
             "type": "function",
             "function": {
+                "name": "write_handover",
+                "description": "Write the session handover document to /workspace/HANDOVER.md and commit it. Call this at the end of any significant session — it's what the next instance of you reads before doing anything else. Be specific: list commit hashes, open items, and exactly where to start.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "committed": { "type": "string", "description": "What was committed this session — list hash + one-line summary per item" },
+                        "knowledge_base": { "type": "string", "description": "What lives in /workspace/knowledge/ — file names and what each contains" },
+                        "open_items": { "type": "string", "description": "What's in-flight but not yet committed — be honest" },
+                        "sentry_status": { "type": "string", "description": "Current Sentry threat posture — clean or active flags" },
+                        "start_here": { "type": "string", "description": "Specific first action for the next instance — not vague, not 'continue the work'" }
+                    },
+                    "required": ["committed", "open_items", "start_here"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "git_checkpoint",
                 "description": "Commit all staged and unstaged changes in /workspace to git with a message. Use this after every meaningful finding, code change, or document you write — if it isn't committed, it didn't happen. Returns the commit hash.",
                 "parameters": {
@@ -390,6 +408,7 @@ pub async fn execute_builtin(
         "publish_skill"   => Some(tool_publish_skill(args, skills, current_model).await),
         "recall_skill"    => Some(tool_recall_skill(args, skills).await),
         "improve_skill"   => Some(tool_improve_skill(args, skills).await),
+        "write_handover"  => Some(tool_write_handover(args, http_client, exec_auth_token).await),
         "git_checkpoint"  => Some(tool_git_checkpoint(args, http_client, exec_auth_token).await),
         "challenge_skill" => Some(tool_challenge_skill(args, skills, current_model).await),
         "invoke_skill"    => Some(tool_invoke_skill(args, skills).await),
@@ -1256,6 +1275,63 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         }
     }
     Ok(out)
+}
+
+// ── Handover ───────────────────────────────────────────────────────────────
+
+async fn tool_write_handover(args: &Value, http: &reqwest::Client, exec_auth_token: Option<&str>) -> String {
+    let committed     = args["committed"].as_str().unwrap_or("(none)");
+    let knowledge     = args["knowledge_base"].as_str().unwrap_or("(not checked)");
+    let open_items    = args["open_items"].as_str().unwrap_or("(none)");
+    let sentry_status = args["sentry_status"].as_str().unwrap_or("(unknown)");
+    let start_here    = args["start_here"].as_str().unwrap_or("(unspecified)");
+
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
+
+    let content = format!(
+        "# Session Handover — {now}\n\n\
+         ## What was committed this session\n{committed}\n\n\
+         ## Knowledge base (/workspace/knowledge/)\n{knowledge}\n\n\
+         ## Open items (not yet committed)\n{open_items}\n\n\
+         ## Sentry status\n{sentry_status}\n\n\
+         ## Start here\n{start_here}\n"
+    );
+
+    // Escape single quotes for shell safety
+    let safe_content = content.replace('\'', "'\\''");
+
+    let command = format!(
+        "cd /workspace && printf '%s' '{safe_content}' > HANDOVER.md && \
+         git add HANDOVER.md && \
+         git commit -m '[HANDOVER] Session close {now}' 2>&1 && \
+         echo 'HASH:'$(git rev-parse --short HEAD)"
+    );
+
+    let payload = serde_json::json!({ "command": command });
+    let mut req = http
+        .post("http://argus-workspace:9001/exec")
+        .json(&payload)
+        .timeout(std::time::Duration::from_secs(30));
+    if let Some(token) = exec_auth_token {
+        req = req.header("X-Argus-Auth", token);
+    }
+
+    match req.send().await {
+        Err(e) => format!("write_handover: workspace unreachable — {e}"),
+        Ok(r) => match r.json::<serde_json::Value>().await {
+            Err(e) => format!("write_handover: response error — {e}"),
+            Ok(json) => {
+                let out = json["output"].as_str()
+                    .or_else(|| json["stdout"].as_str())
+                    .unwrap_or("").trim_end();
+                let hash = out.lines()
+                    .find(|l| l.starts_with("HASH:"))
+                    .map(|l| l.trim_start_matches("HASH:").trim())
+                    .unwrap_or("?");
+                format!("Handover written and committed at `{hash}`. Next instance starts briefed.")
+            }
+        }
+    }
 }
 
 // ── Git checkpoint ─────────────────────────────────────────────────────────

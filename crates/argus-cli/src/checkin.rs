@@ -101,8 +101,56 @@ pub fn spawn_checkin_loop(
     agent_config: AgentConfig,
 ) {
     tokio::spawn(async move {
+        // Generate a factual startup handover before the first check-in fires.
+        // This writes /workspace/HANDOVER.md with real git log and knowledge base state
+        // so the current session already has it by the time the agent takes turns.
+        generate_startup_handover().await;
         run_checkin_loop(supabase, bot_token, chat_id, agent_config).await;
     });
+}
+
+/// Write a factual HANDOVER.md on daemon startup based on current workspace state.
+/// The interpretive sections (open items, start here) are left for the agent to fill via write_handover.
+async fn generate_startup_handover() {
+    use tokio::process::Command;
+    use tokio::time::{timeout, Duration};
+
+    async fn run(cmd: &str) -> String {
+        match timeout(Duration::from_secs(5), Command::new("sh").arg("-c").arg(cmd).output()).await {
+            Ok(Ok(o)) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            _ => "(unavailable)".to_string(),
+        }
+    }
+
+    let git_log = run(
+        "cd /workspace && git log --oneline -10 2>/dev/null"
+    ).await;
+
+    let knowledge = run(
+        "ls /workspace/knowledge/ 2>/dev/null | sed 's/^/- /' || echo '(empty)'"
+    ).await;
+
+    let docs = run(
+        "ls /workspace/docs/ 2>/dev/null | sed 's/^/- /' || echo '(empty)'"
+    ).await;
+
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
+
+    let content = format!(
+        "# Session Handover — {now}\n\
+         *Auto-generated at daemon startup. Agent: update open_items and start_here via write_handover.*\n\n\
+         ## Recent commits in /workspace\n```\n{git_log}\n```\n\n\
+         ## Knowledge base (/workspace/knowledge/)\n{knowledge}\n\n\
+         ## Docs (/workspace/docs/)\n{docs}\n\n\
+         ## Open items\n(Agent: fill this in with write_handover at session close)\n\n\
+         ## Start here\n(Agent: fill this in with write_handover at session close)\n"
+    );
+
+    if let Err(e) = std::fs::write("/workspace/HANDOVER.md", &content) {
+        eprintln!("[handover] Failed to write startup handover: {}", e);
+    } else {
+        eprintln!("[handover] Startup handover written to /workspace/HANDOVER.md");
+    }
 }
 
 async fn run_checkin_loop(

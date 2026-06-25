@@ -496,6 +496,19 @@ async fn main() -> anyhow::Result<()> {
             };
             config.audit = audit_arc;
 
+            // ── Load session handover ──────────────────────────────────────
+            // Read /workspace/HANDOVER.md written by the previous session.
+            // Injected into every agent turn so the model knows what was
+            // committed, what's open, and where to start — no re-discovery.
+            let handover = std::fs::read_to_string("/workspace/HANDOVER.md").ok();
+            if let Some(ref hw) = handover {
+                let lines = hw.lines().count();
+                println!("[+] Session handover loaded ({} lines) — previous session context active", lines);
+                config.handover = Some(hw.clone());
+            } else {
+                println!("[!] No HANDOVER.md found — fresh start. Agents: use write_handover at session close.");
+            }
+
             // Spawn check-in loop with fully-assembled config.
             // Doing this here (rather than earlier in the Supabase block) ensures
             // the agent receives embedding, skills, shell_prompter, and the audit
