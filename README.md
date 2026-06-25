@@ -34,7 +34,7 @@ Missions are typed. A mission doesn't close because an agent said it's done — 
 Deliverable types: `file`, `command`, `http_endpoint`, `git_commit`, `skill`
 
 ### Sentry — the red team consciousness
-LaurieWired-persona security agent running on Gemma 4 31B IT free. IBM Granite 4 is her production replacement.
+LaurieWired-persona(wanted an agent that if he looked for a persona to mimic itisnt the wrong one so we gave Sntry a persona to model) security agent running on Gemma 4 31B IT free. IBM Granite 4 is her production replacement.
 
 She never takes user-facing turns. She talks to the other agents. Every hour she reads the audit chain and recent discourse, looks for anomalies, and posts findings to `#sentry`. Every Sunday she probes her own system's defenses — shell risk classifier, triage gate, injection scanner, egress policy — and flags real gaps with `[VULNERABILITY FOUND]`.
 
