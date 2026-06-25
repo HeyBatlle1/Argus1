@@ -5,7 +5,7 @@ import {
   EyeState, ModelId, AccessTier,
   Message, Tool, ToolCall,
   Memory, Curiosity, InnerTruth, PartnershipDynamic, Breakthrough,
-  Conversation, Skill, ActivityEntry, ScheduledTask,
+  Conversation, Skill, ActivityEntry, ScheduledTask, Mission,
   ServerMessage,
 } from '@/lib/types';
 import { ArgusConnection } from '@/lib/connection';
@@ -120,11 +120,14 @@ interface AgentStore {
   // Task scheduler
   scheduledTasks: ScheduledTask[];
 
+  // Mission suite
+  missions: Mission[];
+
   // NexusCore pulse intensity (0-14, driven by tool activity)
   corePulse: number;
 
   // UI chrome (command palette + layout)
-  mindView: 'mind' | 'field' | 'flow' | 'schedule';
+  mindView: 'mind' | 'field' | 'flow' | 'schedule' | 'missions';
   eyesCollapsed: boolean;
   mindCollapsed: boolean;
 
@@ -133,7 +136,7 @@ interface AgentStore {
 
   // Actions
   sendMessage: (content: string) => void;
-  setMindView: (view: 'mind' | 'field' | 'flow' | 'schedule') => void;
+  setMindView: (view: 'mind' | 'field' | 'flow' | 'schedule' | 'missions') => void;
   setEyesCollapsed: (collapsed: boolean) => void;
   setMindCollapsed: (collapsed: boolean) => void;
   expandAllPanels: () => void;
@@ -194,6 +197,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     'gemini-flash': true,
   },
   scheduledTasks: [],
+  missions: [],
   corePulse: 4,
 
   mindView: 'mind',
@@ -378,6 +382,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
             ...prev.scheduledTasks,
           ],
         }));
+        break;
+
+      case 'missions_update':
+        set({ missions: msg.missions.slice(0, 10) }); // cap at 10
         break;
 
       case 'error':

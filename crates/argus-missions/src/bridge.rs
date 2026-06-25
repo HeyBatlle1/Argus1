@@ -43,6 +43,12 @@ impl MissionExecutor for MissionBridge {
             ).await
         })
     }
+
+    fn list_missions_json(&self) -> Vec<serde_json::Value> {
+        self.registry.list_all().into_iter()
+            .map(|m| serde_json::to_value(&m).unwrap_or_default())
+            .collect()
+    }
 }
 
 /// Tool schemas to append to builtin_tool_schemas() in argus-core.

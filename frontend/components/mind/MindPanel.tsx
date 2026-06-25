@@ -17,6 +17,7 @@ import { SkillsList } from './SkillsList';
 import { ActivityFeed } from './ActivityFeed';
 import { SemanticField } from './SemanticField';
 import { ScheduleChronicle } from './ScheduleChronicle';
+import { MissionPanel } from './MissionPanel';
 
 // ExecutionFlow uses @xyflow/react which needs DOM — import with ssr:false
 const ExecutionFlow = dynamic(
@@ -28,17 +29,18 @@ const ExecutionFlow = dynamic(
   )}
 );
 
-type View = 'mind' | 'field' | 'flow' | 'schedule';
+type View = 'mind' | 'field' | 'flow' | 'schedule' | 'missions';
 
 interface Props {
   forceCollapsed?: boolean;
 }
 
 const TAB_LABELS: { id: View; label: string; hint: string }[] = [
-  { id: 'mind',     label: 'MIND',   hint: 'memory · skills' },
-  { id: 'field',    label: 'GRAPH',  hint: 'knowledge map' },
-  { id: 'flow',     label: 'FLOW',   hint: 'tool graph' },
-  { id: 'schedule', label: 'SCHED',  hint: 'tasks' },
+  { id: 'mind',     label: 'MIND',    hint: 'memory · skills' },
+  { id: 'field',    label: 'GRAPH',   hint: 'knowledge map' },
+  { id: 'flow',     label: 'FLOW',    hint: 'tool graph' },
+  { id: 'schedule', label: 'SCHED',   hint: 'tasks' },
+  { id: 'missions', label: 'MISSIONS', hint: 'active missions' },
 ];
 
 export function MindPanel({ forceCollapsed = false }: Props) {
@@ -58,6 +60,7 @@ export function MindPanel({ forceCollapsed = false }: Props) {
   const activity    = useAgentStore((s) => s.activity);
   const activeToolCalls  = useAgentStore((s) => s.activeToolCalls);
   const scheduledTasks   = useAgentStore((s) => s.scheduledTasks);
+  const missions         = useAgentStore((s) => s.missions);
 
   return (
     <motion.div
@@ -117,10 +120,12 @@ export function MindPanel({ forceCollapsed = false }: Props) {
             <div className="flex border-b border-argus-border flex-shrink-0" style={{ background: 'rgba(255,255,255,0.015)' }}>
               {TAB_LABELS.map(({ id, label }) => {
                 const isActive = view === id;
+                const activeMissions = missions.filter(m => m.status !== 'complete' && m.status !== 'failed').length;
                 const badge =
                   id === 'flow' && activeToolCalls.length > 0 ? activeToolCalls.length :
                   id === 'schedule' && scheduledTasks.filter(t => t.status === 'pending').length > 0
-                    ? scheduledTasks.filter(t => t.status === 'pending').length
+                    ? scheduledTasks.filter(t => t.status === 'pending').length :
+                  id === 'missions' && activeMissions > 0 ? activeMissions
                     : undefined;
                 return (
                   <button
@@ -152,6 +157,7 @@ export function MindPanel({ forceCollapsed = false }: Props) {
               {view === 'field'    && <SemanticField />}
               {view === 'flow'     && <ExecutionFlow />}
               {view === 'schedule' && <ScheduleChronicle />}
+              {view === 'missions' && <MissionPanel />}
               {view === 'mind'  && (
                 <div className="h-full overflow-y-auto">
                   {/* GUEST tier */}

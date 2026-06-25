@@ -3,10 +3,21 @@
 import { useAgentStore } from '@/hooks/useAgentState';
 import { getModelConfig } from '@/lib/models';
 import { BUILDER_THEME, PRIMARY_CODER } from '@/lib/builder';
+import { useCallback } from 'react';
 
 export function BuilderStation() {
-  const activeModel = useAgentStore((s) => s.activeModel);
-  const summonBuilder = useAgentStore((s) => s.summonBuilder);
+  const activeModel    = useAgentStore((s) => s.activeModel);
+  const summonBuilder  = useAgentStore((s) => s.summonBuilder);
+  const missions       = useAgentStore((s) => s.missions);
+  const setMindView    = useAgentStore((s) => s.setMindView);
+  const sendMessage    = useAgentStore((s) => s.sendMessage);
+  const activeMissions = missions.filter(m => m.status !== 'complete' && m.status !== 'failed');
+
+  const launchMission = useCallback(() => {
+    summonBuilder();
+    sendMessage('list_missions');
+    setMindView('missions');
+  }, [summonBuilder, sendMessage, setMindView]);
 
   const cfg = getModelConfig(PRIMARY_CODER);
   const isActive = activeModel === PRIMARY_CODER;
@@ -58,6 +69,39 @@ export function BuilderStation() {
               ⌘B to summon · click to select
             </div>
           )}
+        </div>
+      </button>
+
+      {/* Mission launcher */}
+      <button
+        onClick={launchMission}
+        className="w-full mt-1.5 text-left rounded overflow-hidden transition-all duration-150 hover:opacity-80"
+        style={{
+          background: 'rgba(74,222,128,0.04)',
+          border: '1px solid rgba(74,222,128,0.12)',
+          padding: '6px 10px',
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px]" style={{ color: '#4ade80' }}>⬡</span>
+            <span className="text-[8px] font-mono uppercase tracking-wider" style={{ color: '#4ade80' }}>
+              Missions
+            </span>
+          </div>
+          {activeMissions.length > 0 ? (
+            <span
+              className="text-[7px] font-mono px-1.5 py-px rounded"
+              style={{ background: 'rgba(74,222,128,0.15)', color: '#4ade80' }}
+            >
+              {activeMissions.length} active
+            </span>
+          ) : (
+            <span className="text-[7px] font-mono text-[#2a2a38]">launch</span>
+          )}
+        </div>
+        <div className="text-[7px] font-mono mt-0.5" style={{ color: '#2a2a38' }}>
+          typed deliverables · sentry gate · parallel execution
         </div>
       </button>
 

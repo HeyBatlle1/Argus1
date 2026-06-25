@@ -157,6 +157,40 @@ export interface ScheduledTask {
   createdAt: string;
 }
 
+// ── Mission types ──────────────────────────────────────────────────────────
+
+export type MissionStatus =
+  | 'planning' | 'sentry_review' | 'sentry_hold'
+  | 'executing' | 'verifying' | 'complete' | 'failed';
+
+export interface MissionSubtask {
+  id: string;
+  description: string;
+  assigned_model: string;
+  status: 'pending' | 'running' | 'complete' | 'failed' | 'skipped';
+  output?: string;
+}
+
+export interface MissionDeliverable {
+  type: 'file' | 'command' | 'http_endpoint' | 'git_commit' | 'skill';
+  description: string;
+  passed?: boolean;
+  output?: string;
+}
+
+export interface Mission {
+  id: string;
+  objective: string;
+  created_by: string;
+  primary_executor: string;
+  status: MissionStatus;
+  subtasks: MissionSubtask[];
+  deliverables: MissionDeliverable[];
+  created_at: string;
+  completed_at?: string;
+  commit_hash?: string;
+}
+
 export type ClientMessage =
   | { type: 'user_message'; content: string }
   | { type: 'switch_model'; model: ModelId }
@@ -165,7 +199,8 @@ export type ClientMessage =
   | { type: 'cancel' }
   | { type: 'new_conversation' }
   | { type: 'load_conversation'; id: string }
-  | { type: 'list_conversations' };
+  | { type: 'list_conversations' }
+  | { type: 'list_missions' };
 
 export type ServerMessage =
   | { type: 'thinking' }
@@ -182,4 +217,5 @@ export type ServerMessage =
   | { type: 'conversation_started'; id: string; title: string }
   | { type: 'skills_update'; skills: Skill[] }
   | { type: 'activity_update'; entries: ActivityEntry[] }
-  | { type: 'task_scheduled'; id: string; agent: string; run_at: string | null; description: string };
+  | { type: 'task_scheduled'; id: string; agent: string; run_at: string | null; description: string }
+  | { type: 'missions_update'; missions: Mission[] };

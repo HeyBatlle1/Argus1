@@ -35,6 +35,7 @@ enum ClientMessage {
     NewConversation,
     LoadConversation { id: String },
     ListConversations,
+    ListMissions,
 }
 
 /// Memory record serialized to match the frontend Memory type
@@ -144,6 +145,10 @@ enum ServerMessage {
         agent: String,
         run_at: Option<String>,
         description: String,
+    },
+    /// Live mission state — sent in response to list_missions and after status changes.
+    MissionsUpdate {
+        missions: Vec<serde_json::Value>,
     },
 }
 
@@ -305,6 +310,8 @@ struct AppState {
     /// Per-model tool toggle — operator can disable tools for any model from the UI.
     /// Anthropic models default to always-enabled; others default true but are toggleable.
     model_tools: Arc<tokio::sync::RwLock<HashMap<String, bool>>>,
+    /// Mission executor — queried to get mission list for the frontend.
+    mission_executor: Option<std::sync::Arc<dyn argus_core::MissionExecutor>>,
 }
 
 // ─── Router ────────────────────────────────────────────────────────────────
@@ -353,6 +360,7 @@ pub async fn run_web_server(
         discord_bot_token:  config.discord_bot_token,
         discord_channel_id: config.discord_channel_id,
         model_tools:        Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        mission_executor:   config.mission_executor.clone(),
     });
 
     let cors = CorsLayer::new()
@@ -752,6 +760,13 @@ async fn handle_socket(
                 let conversations = c.memory.list_conversations(30).unwrap_or_default()
                     .into_iter().map(ConversationPayload::from).collect();
                 let _ = tx.send(ServerMessage::ConversationsList { conversations });
+            }
+
+            ClientMessage::ListMissions => {
+                let missions = state.mission_executor.as_ref()
+                    .map(|exec| exec.list_missions_json())
+                    .unwrap_or_default();
+                let _ = tx.send(ServerMessage::MissionsUpdate { missions });
             }
         }
     }

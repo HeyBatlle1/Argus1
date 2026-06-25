@@ -13,6 +13,12 @@ pub trait MissionExecutor: Send + Sync {
         args: &'a serde_json::Value,
         model: &'a str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>;
+
+    /// Serialize all missions to JSON for the WebSocket layer.
+    /// Default: empty vec. MissionBridge overrides with real data.
+    fn list_missions_json(&self) -> Vec<serde_json::Value> {
+        vec![]
+    }
 }
 use crate::tools::{self, MemoryBackend};
 use crate::embedding::EmbeddingClient;
