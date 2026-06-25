@@ -496,17 +496,18 @@ async fn main() -> anyhow::Result<()> {
             };
             config.audit = audit_arc;
 
-            // ── Load session handover ──────────────────────────────────────
-            // Read /workspace/HANDOVER.md written by the previous session.
-            // Injected into every agent turn so the model knows what was
-            // committed, what's open, and where to start — no re-discovery.
+            // ── Session handover ───────────────────────────────────────────
+            // Write a factual startup brief to /workspace/HANDOVER.md, then
+            // immediately read it back into config so it's injected into turns.
+            // Done synchronously here — no async race, guaranteed before first turn.
+            checkin::write_startup_handover();
             let handover = std::fs::read_to_string("/workspace/HANDOVER.md").ok();
             if let Some(ref hw) = handover {
                 let lines = hw.lines().count();
-                println!("[+] Session handover loaded ({} lines) — previous session context active", lines);
+                println!("[+] Session handover ready ({} lines)", lines);
                 config.handover = Some(hw.clone());
             } else {
-                println!("[!] No HANDOVER.md found — fresh start. Agents: use write_handover at session close.");
+                println!("[!] /workspace not mounted — handover skipped");
             }
 
             // Spawn check-in loop with fully-assembled config.

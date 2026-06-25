@@ -101,18 +101,13 @@ pub fn spawn_checkin_loop(
     agent_config: AgentConfig,
 ) {
     tokio::spawn(async move {
-        // Generate a factual startup handover before the first check-in fires.
-        // This writes /workspace/HANDOVER.md with real git log and knowledge base state
-        // so the current session already has it by the time the agent takes turns.
-        generate_startup_handover().await;
         run_checkin_loop(supabase, bot_token, chat_id, agent_config).await;
     });
 }
 
 /// Write a factual HANDOVER.md on daemon startup from what the daemon can see directly.
-/// Daemon has /workspace mounted — reads filesystem, no git needed (git lives in workspace container).
-/// Interpretive sections (open items, start here) are for the agent to fill via write_handover.
-async fn generate_startup_handover() {
+/// Called synchronously in main.rs before spawning any async tasks — no race conditions.
+pub fn write_startup_handover() {
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
 
     // Read existing HANDOVER.md — if agent wrote one last session, keep it and
