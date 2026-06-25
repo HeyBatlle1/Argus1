@@ -304,6 +304,49 @@ impl SupabaseClient {
         Ok(records)
     }
 
+    // ── Auto-migration ────────────────────────────────────────────────────
+
+    /// Ensure required tables exist. Called once at daemon startup.
+    /// Uses Supabase's SQL endpoint — creates tables if missing, no-ops if they exist.
+    pub async fn ensure_schema(&self) {
+        let migrations: &[(&str, &str)] = &[
+            ("argus_missions", "
+                CREATE TABLE IF NOT EXISTS argus_missions (
+                    id               UUID PRIMARY KEY,
+                    objective        TEXT NOT NULL,
+                    created_by       TEXT NOT NULL,
+                    primary_executor TEXT NOT NULL DEFAULT 'grok-build',
+                    status           TEXT NOT NULL DEFAULT 'planning',
+                    subtasks         JSONB NOT NULL DEFAULT '[]',
+                    deliverables     JSONB NOT NULL DEFAULT '[]',
+                    verification     JSONB NOT NULL DEFAULT '[]',
+                    sentry_request_id TEXT,
+                    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    completed_at     TIMESTAMPTZ
+                );
+                CREATE INDEX IF NOT EXISTS idx_argus_missions_status ON argus_missions (status);
+                ALTER TABLE argus_missions ENABLE ROW LEVEL SECURITY;
+            "),
+        ];
+
+        for (table, sql) in migrations {
+            // Check if table exists first
+            let check = self.select(table, "limit=1").await;
+            if check.is_ok() {
+                continue; // table exists
+            }
+            // Table missing — apply migration via rpc if available
+            let body = serde_json::json!({ "query": sql });
+            match self.rpc("exec_sql", &body).await {
+                Ok(_) => eprintln!("[schema] Created table: {}", table),
+                Err(_) => {
+                    // rpc may not exist — try direct insert to trigger table creation notice
+                    eprintln!("[schema] Table '{}' missing — apply migrations/007_argus_missions.sql in Supabase dashboard", table);
+                }
+            }
+        }
+    }
+
     // ── Mission persistence ────────────────────────────────────────────────
 
     /// Upsert a mission to argus_missions table (insert or update by id).

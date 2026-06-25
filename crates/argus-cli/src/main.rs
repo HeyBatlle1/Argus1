@@ -287,6 +287,9 @@ async fn main() -> anyhow::Result<()> {
                 // (embedding, skills, shell_prompter, audit all wired in before spawn).
                 let ec = argus_core::EmbeddingClient::new(&config.api_key, supabase.clone());
                 println!("[+] Semantic memory enabled (3072-dim pgvector)");
+                // Auto-create any missing tables on startup
+                let sb_schema = supabase.clone();
+                tokio::spawn(async move { sb_schema.ensure_schema().await });
                 supabase_client = Some(supabase);
                 Some(ec)
             } else {
