@@ -14,7 +14,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use argus_crypto::{SecureVault, vault::VaultError};
-use argus_core::{AgentConfig, SentryBus};
+use argus_core::{AgentConfig, ConstraintClient, SentryBus};
 use std::sync::Arc;
 use chrono;
 
@@ -292,6 +292,9 @@ async fn main() -> anyhow::Result<()> {
                 // Auto-create any missing tables on startup
                 let sb_schema = supabase.clone();
                 tokio::spawn(async move { sb_schema.ensure_schema().await });
+                // Wire active constraint client — pre-flight enforcement gate
+                config.constraints = Some(ConstraintClient::new(supabase.clone()));
+                println!("[+] Active constraint gate enabled — Sentry's enforcement is live");
                 supabase_client = Some(supabase);
                 Some(ec)
             } else {

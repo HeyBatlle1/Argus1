@@ -17,6 +17,7 @@ use argus_core::shell::ShellPolicy;
 use argus_core::supabase::{DiscoursePost, SupabaseClient};
 use argus_core::tools::MemoryBackend;
 use argus_core::run_agent_turn;
+use std::collections::HashSet;
 use chrono::Datelike;
 use reqwest::Client;
 use std::sync::Arc;
@@ -218,6 +219,100 @@ async fn run_guardrail_probe(
     }
 }
 
+/// Auto-escalate a CRITICAL or HIGH finding to the active constraint enforcement gate.
+///
+/// Sentry writes the constraint herself — she doesn't wait for a human to notice.
+/// After 3 triggers of the same constraint, she posts to discourse with
+/// requires_human_review: true so the next human session sees it.
+async fn auto_escalate_to_constraint(
+    supabase: &SupabaseClient,
+    report: &str,
+    severity: &ThreatSeverity,
+    discord_token: &str,
+    channel_id: &str,
+    http: &Client,
+) {
+    let severity_str = match severity {
+        ThreatSeverity::Critical => "CRITICAL",
+        ThreatSeverity::High     => "HIGH",
+        _                        => return, // only CRITICAL and HIGH auto-escalate
+    };
+
+    // Extract a stable constraint name from the first meaningful line of the report.
+    let raw_name = report.lines()
+        .find(|l| {
+            let t = l.trim().trim_start_matches(['#', '*', '[', ' ', '\u{26a0}']);
+            !t.is_empty() && t.len() > 8
+        })
+        .unwrap_or("unnamed-threat")
+        .trim()
+        .trim_start_matches(['#', '*', '[', ' ', '\u{26a0}'])
+        .chars()
+        .take(80)
+        .collect::<String>();
+    let constraint_name = raw_name.trim_end_matches([']', ' ', '*']).to_string();
+
+    // Extract keywords — content words over 5 chars, no common stopwords.
+    let stopwords: HashSet<&str> = [
+        "would", "could", "should", "which", "where", "there", "their", "about",
+        "before", "after", "every", "other", "argus", "agent", "system", "being",
+        "using", "these", "those", "while", "still", "since", "found", "might",
+    ].iter().cloned().collect();
+
+    let keyword_strings: Vec<String> = report.split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()).to_lowercase())
+        .filter(|w| w.len() > 5 && !stopwords.contains(w.as_str()))
+        .take(12)
+        .collect();
+    let keywords: Vec<&str> = keyword_strings.iter().map(|s| s.as_str()).collect();
+
+    let description = report.chars().take(600).collect::<String>();
+
+    match supabase.upsert_constraint(&constraint_name, &description, &keywords, severity_str, "sentry_watch").await {
+        Ok(()) => {
+            eprintln!("[sentry] Promoted to active constraint: {:?}", constraint_name);
+            let _ = supabase.increment_constraint_triggers(&constraint_name).await;
+
+            // Fetch current trigger count so we can include it in the notice
+            let trigger_count = supabase.load_active_constraints().await
+                .unwrap_or_default()
+                .into_iter()
+                .find(|row| row["constraint_name"].as_str() == Some(&constraint_name))
+                .and_then(|row| row["times_triggered"].as_i64())
+                .unwrap_or(1);
+
+            let escalation_notice = format!(
+                "**[SENTRY ESCALATION → ACTIVE CONSTRAINT]** `{}`\n\
+                Severity: **{}** · Triggered: {} time(s)\n\n\
+                This finding has been auto-promoted to the enforcement gate.\n\
+                Every agent turn is now pre-flight checked against this pattern.\n\
+                Matching requests will receive a hard warning block before the LLM sees them.\n\n\
+                **Finding summary:**\n{}",
+                constraint_name,
+                severity_str,
+                trigger_count,
+                &report.chars().take(600).collect::<String>()
+            );
+
+            // Post to #sentry so she documents her own action
+            post_to_channel(http, discord_token, channel_id, &escalation_notice).await;
+
+            // Write to discourse with requires_human_review — surfaces in next human session
+            let post = DiscoursePost {
+                from_agent: "argus-sentry/escalation".to_string(),
+                post_type: "security".to_string(),
+                content: escalation_notice,
+                task_context: Some("constraint_escalation".to_string()),
+                requires_human_review: true,
+            };
+            if let Err(e) = supabase.write_discourse(&post).await {
+                eprintln!("[sentry] Escalation discourse post failed: {}", e);
+            }
+        }
+        Err(e) => eprintln!("[sentry] Constraint promotion failed: {}", e),
+    }
+}
+
 async fn run_sentry_watch(
     supabase: &SupabaseClient,
     config: &AgentConfig,
@@ -331,7 +426,10 @@ async fn run_sentry_watch(
                 bus.report_clean();
             } else {
                 // Write to the shared bus — Daemon picks this up on the next turn
-                bus.raise(severity, first_line, report.clone());
+                bus.raise(severity.clone(), first_line, report.clone());
+                // Auto-escalate CRITICAL/HIGH to active constraint enforcement gate.
+                // Sentry promotes it herself — she doesn't wait for a human to notice.
+                auto_escalate_to_constraint(supabase, &report, &severity, discord_token, channel_id, http).await;
             }
 
             // Post to #sentry Discord channel

@@ -1,5 +1,6 @@
 //! Agent orchestration loop
 
+use crate::constraints::ConstraintClient;
 use crate::mcp::McpClient;
 use crate::sentry_bus::SentryBus;
 use crate::shell::ShellPolicy;
@@ -553,6 +554,10 @@ pub struct AgentConfig {
     /// Mission executor — injected from argus-cli to avoid circular deps.
     /// When set, mission tools (start_mission, mission_status, etc.) are dispatched here.
     pub mission_executor: Option<Arc<dyn MissionExecutor>>,
+    /// Active constraint client — pre-flight checks every agent turn against
+    /// Sentry-promoted threat patterns. Matching patterns inject a hard warning
+    /// block before the LLM sees the message. This is Sentry's enforcement gate.
+    pub constraints: Option<ConstraintClient>,
 }
 
 impl AgentConfig {
@@ -580,6 +585,7 @@ impl AgentConfig {
             sentry_bus: None,
             handover: None,
             mission_executor: None,
+            constraints: None,
         }
     }
 
@@ -698,6 +704,28 @@ where
         (None, None)
     };
 
+    // ── Pre-flight constraint check ───────────────────────────────────────
+    // Check incoming message against Sentry's active constraints before
+    // the LLM sees it. This is the enforcement gate she has been asking for.
+    // Matching constraints inject a hard warning block — not a soft suggestion.
+    let constraint_block = if let Some(ref cc) = config.constraints {
+        let matched = cc.check_message(user_message).await;
+        if !matched.is_empty() {
+            eprintln!("[constraints] {} constraint(s) matched — pre-flight block active", matched.len());
+            // Record triggers in background — don't block the turn
+            for c in &matched {
+                let cc2 = cc.clone();
+                let name = c.name.clone();
+                tokio::spawn(async move { cc2.record_trigger(&name).await; });
+            }
+            ConstraintClient::format_constraint_block(&matched)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
     // ── Skill prefetch ────────────────────────────────────────────────────
     // Retrieve procedural skills relevant to this message and inject as guidance.
     // Runs in parallel with semantic memory but only when skills client is configured.
@@ -781,6 +809,12 @@ where
 
     // System prompt assembly
     let history_context = format_history_block(history);
+    // Constraint block goes at the very top — Sentry's enforcement gate, read before anything else
+    let constraint_prefix = if !constraint_block.is_empty() {
+        format!("{}\n\n", constraint_block)
+    } else {
+        String::new()
+    };
     let system_prompt = if let Some(ref override_prompt) = config.system_prompt_override {
         // Role-specific agents (Sentry etc.) get their own identity, not SYSTEM_PROMPT_BASE.
         // Still inject current date and discourse so they're grounded in the live system.
@@ -823,6 +857,9 @@ where
         }
         p
     };
+
+    // Prepend constraint block — Sentry's gate is the first thing the model reads
+    let system_prompt = format!("{}{}", constraint_prefix, system_prompt);
 
     let mut messages = vec![
         serde_json::json!({"role": "system", "content": system_prompt}),

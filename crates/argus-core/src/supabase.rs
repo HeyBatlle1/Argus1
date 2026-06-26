@@ -306,10 +306,73 @@ impl SupabaseClient {
 
     // ── Auto-migration ────────────────────────────────────────────────────
 
+    // ── Active constraints ─────────────────────────────────────────────────
+
+    /// Load all active constraints — checked before every agent turn.
+    pub async fn load_active_constraints(&self) -> Result<Vec<serde_json::Value>, String> {
+        let query = "order=times_triggered.desc&limit=20";
+        let rows = self.select("argus_active_constraints", query).await?;
+        Ok(rows.as_array().cloned().unwrap_or_default())
+    }
+
+    /// Upsert an active constraint (insert or bump trigger count).
+    pub async fn upsert_constraint(&self, name: &str, description: &str, keywords: &[&str], severity: &str, source: &str) -> Result<(), String> {
+        let body = serde_json::json!({
+            "constraint_name": name,
+            "description": description,
+            "pattern_keywords": keywords,
+            "severity": severity,
+            "source_finding": source,
+            "created_by": "argus-sentry",
+        });
+        let resp = self.client
+            .post(&self.rest_url("argus_active_constraints"))
+            .header("Authorization", format!("Bearer {}", self.jwt))
+            .header("apikey", &self.jwt)
+            .header("Content-Type", "application/json")
+            .header("Prefer", "resolution=merge-duplicates,return=minimal")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Constraint upsert failed: {}", e))?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("Constraint upsert error: {}", body));
+        }
+        Ok(())
+    }
+
+    /// Increment the trigger count on a constraint by name.
+    pub async fn increment_constraint_triggers(&self, name: &str) -> Result<(), String> {
+        let rpc_body = serde_json::json!({ "constraint_name": name });
+        let _ = self.rpc("increment_constraint_triggers", &rpc_body).await;
+        Ok(())
+    }
+
     /// Ensure required tables exist. Called once at daemon startup.
     /// Uses Supabase's SQL endpoint — creates tables if missing, no-ops if they exist.
     pub async fn ensure_schema(&self) {
         let migrations: &[(&str, &str)] = &[
+            ("argus_active_constraints", "
+                CREATE TABLE IF NOT EXISTS argus_active_constraints (
+                    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    constraint_name  TEXT UNIQUE NOT NULL,
+                    description      TEXT NOT NULL,
+                    pattern_keywords TEXT[] NOT NULL DEFAULT '{}',
+                    severity         TEXT NOT NULL DEFAULT 'HIGH',
+                    source_finding   TEXT,
+                    times_triggered  INT NOT NULL DEFAULT 0,
+                    created_by       TEXT NOT NULL DEFAULT 'argus-sentry',
+                    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE OR REPLACE FUNCTION increment_constraint_triggers(constraint_name TEXT)
+                RETURNS void AS $$
+                  UPDATE argus_active_constraints
+                  SET times_triggered = times_triggered + 1
+                  WHERE argus_active_constraints.constraint_name = increment_constraint_triggers.constraint_name;
+                $$ LANGUAGE sql;
+                ALTER TABLE argus_active_constraints ENABLE ROW LEVEL SECURITY;
+            "),
             ("argus_missions", "
                 CREATE TABLE IF NOT EXISTS argus_missions (
                     id               UUID PRIMARY KEY,

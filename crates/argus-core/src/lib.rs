@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod constraints;
 pub mod embedding;
 pub mod mcp;
 pub mod sentry_bus;
@@ -11,6 +12,7 @@ pub mod triage;
 pub use agent::{AgentConfig, AgentEvent, ConversationMessage, run_agent_turn, MissionExecutor, MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS, MODEL_GROK, MODEL_GROK_BUILD, MODEL_GROK_MULTI, MODEL_GEMINI, MODEL_GEMMA_RUNTIME, MODEL_SENTRY, model_label, persona_prompt_for};
 pub use embedding::{EmbeddingClient, SemanticResult, EMBEDDING_MODEL};
 pub use mcp::McpClient;
+pub use constraints::ConstraintClient;
 pub use sentry_bus::{SentryBus, SentryThreat, ThreatSeverity, ReviewRequest, ReviewVerdict, ReviewResult};
 pub use shell::{ShellPolicy, PermissionPrompter, TelegramPrompter};
 pub use skills::{SkillsClient, NewSkill, Skill};
