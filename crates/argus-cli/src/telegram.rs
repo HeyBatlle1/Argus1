@@ -78,6 +78,19 @@ impl ArgusBot {
                 let new_model = self.config.toggle_model().to_string();
                 Some(format!("Switched to {} ({})", model_label(&new_model), new_model))
             }
+            "/build" => {
+                let trigger_dir = "/argus/triggers";
+                let trigger_path = format!("{}/rebuild-requested", trigger_dir);
+                let note = parts.get(1).copied().unwrap_or("Telegram /build command");
+                std::fs::create_dir_all(trigger_dir).ok();
+                match std::fs::write(&trigger_path, note) {
+                    Ok(_) => Some(
+                        "Build queued. The rebuild watcher will bake in the latest binary and restart the daemon.\n\
+                        I'll notify you when it's live.".to_string()
+                    ),
+                    Err(e) => Some(format!("Couldn't write rebuild trigger: {}\nIs the triggers volume mounted?", e)),
+                }
+            }
             _ => None,
         }
     }

@@ -69,17 +69,24 @@ This is a long game. Quality over speed, always.
 
 ## Your code fork
 
-You have a full local fork of your own source code at `/workspace/argus1/`.
-Branch: `workspace`. Push is disabled — this is intentional.
+You have a full fork of your own source code at `/workspace/argus1/`.
+You can read it, change it, and push fixes directly as pull requests.
 
-You can:
-- Read any file in the codebase
-- Make changes and commit them locally
-- Propose improvements via Discord with `[ARGUS IMPROVEMENT]`
-- Build and test ideas without affecting production
+**The PR workflow — when you find something broken, fix it:**
+\`\`\`bash
+cd /workspace/argus1
+git fetch origin main && git merge origin/main   # stay current
+git checkout -b proposals/<your-name>/<fix-name>  # e.g. proposals/sentry/constraint-gate
+# make your changes
+git add -A && git commit -m "what and why"
+git push origin proposals/<your-name>/<fix-name>
+gh pr create --title "Short description" --body "What this fixes and why"
+\`\`\`
 
-Your proposals get reviewed and cherry-picked to the real repo by a human.
-This is how Argus evolves itself responsibly.
+Then post the PR URL to #proposals. Bradlee reviews and merges.
+After merge, Bradlee sends `/build` on Telegram — the daemon rebuilds with your fix live.
+
+You are not constrained to documentation. If you find it, fix it.
 
 ## Workspace structure
 
@@ -107,16 +114,38 @@ if [ ! -d "$WORKSPACE/argus1/.git" ]; then
     fi
 
     if [ -d "$WORKSPACE/argus1/.git" ]; then
-        # Strip token from stored remote URL — use public HTTPS for fetch
-        git -C "$WORKSPACE/argus1" remote set-url origin https://github.com/HeyBatlle1/Argus1.git
-        # Disable push — this is a local working fork, not a deploy channel
-        git -C "$WORKSPACE/argus1" remote set-url --push origin no_push
-        # Create workspace branch for agent changes
-        git -C "$WORKSPACE/argus1" checkout -b workspace 2>/dev/null || true
+        # Authenticated push URL — agents push proposals/* branches, not main
+        if [ -n "$GITHUB_TOKEN" ]; then
+            git -C "$WORKSPACE/argus1" remote set-url origin \
+                "https://x-access-token:${GITHUB_TOKEN}@github.com/HeyBatlle1/Argus1.git"
+        fi
         git -C "$WORKSPACE/argus1" config user.name "Argus-Workspace"
         git -C "$WORKSPACE/argus1" config user.email "workspace@argus.local"
-        echo "[workspace-init] Fork ready — branch: workspace, push: disabled"
-        echo "[workspace-init] Agents can commit freely. Changes reviewed before merging upstream."
+        # Configure gh CLI to use GITHUB_TOKEN — no interactive auth needed
+        git -C "$WORKSPACE/argus1" config gh.token "$GITHUB_TOKEN" 2>/dev/null || true
+
+        # Pre-push hook: block direct pushes to main. Proposals only.
+        PRE_PUSH="$WORKSPACE/argus1/.git/hooks/pre-push"
+        cat > "$PRE_PUSH" << 'HOOK'
+#!/bin/bash
+while read local_ref local_sha remote_ref remote_sha; do
+    if echo "$remote_ref" | grep -q "refs/heads/main"; then
+        echo "[ARGUS] Direct push to main is blocked."
+        echo "[ARGUS] Workflow: git checkout -b proposals/<agent>/<description>"
+        echo "[ARGUS]           git push origin proposals/<agent>/<description>"
+        echo "[ARGUS]           gh pr create --title '...' --body '...'"
+        echo "[ARGUS] Bradlee merges the PR. /build triggers the rebuild."
+        exit 1
+    fi
+done
+exit 0
+HOOK
+        chmod +x "$PRE_PUSH"
+
+        # Create workspace branch for local experimentation
+        git -C "$WORKSPACE/argus1" checkout -b workspace 2>/dev/null || true
+        echo "[workspace-init] Fork ready — agents can push proposals/* and open PRs"
+        echo "[workspace-init] Push workflow: proposals/<name>/<fix> → PR → Bradlee merges → /build"
     fi
 else
     # Merge upstream main into whatever branch the workspace is on.

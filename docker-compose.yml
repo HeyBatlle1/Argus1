@@ -29,6 +29,7 @@ services:
       - workspace:/workspace
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ~/.argus/mcp.json:/home/argus/.argus/mcp.json:ro
+      - ~/.argus/triggers:/argus/triggers
     depends_on:
       - argus-workspace
     deploy:

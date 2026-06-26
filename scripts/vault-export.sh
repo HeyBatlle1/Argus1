@@ -52,5 +52,25 @@ load_argus_secrets() {
   [ -n "$GITHUB_TOKEN" ]             && echo "  [+] GitHub       ✓" || echo "  [-] GitHub       not set (optional)"
   echo "  [+] WS token     ✓ (runtime — no frontend rebuild needed)"
 
+  # Cache env for the rebuild watcher — lets /build trigger rebuild without
+  # re-entering the vault passphrase. File is owner-read-only (600).
+  mkdir -p ~/.argus/triggers && chmod 700 ~/.argus
+  {
+    echo "OPENROUTER_API_KEY=$OPENROUTER_API_KEY"
+    echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN"
+    echo "SUPABASE_ARGUS_URL=$SUPABASE_ARGUS_URL"
+    echo "SUPABASE_ARGUS_SERVICE_KEY=$SUPABASE_ARGUS_SERVICE_KEY"
+    echo "TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID"
+    echo "WORKSPACE_EXEC_TOKEN=$WORKSPACE_EXEC_TOKEN"
+    echo "BRAVE_SEARCH_API_KEY=$BRAVE_SEARCH_API_KEY"
+    echo "DISCORD_BOT_TOKEN=$DISCORD_BOT_TOKEN"
+    echo "DISCORD_CHANNEL_ID=$DISCORD_CHANNEL_ID"
+    echo "GITHUB_TOKEN=$GITHUB_TOKEN"
+    echo "ARGUS_WS_TOKEN=$ARGUS_WS_TOKEN"
+    echo "ARGUS_ECONOMY_MODE=${ARGUS_ECONOMY_MODE:-1}"
+  } > ~/.argus/.env.cache
+  chmod 600 ~/.argus/.env.cache
+  echo "  [+] Env cached   ✓ (rebuild watcher ready)"
+
   return 0
 }
