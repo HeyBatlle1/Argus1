@@ -57,7 +57,8 @@ const ECONOMY_HAIKU_HOUR: u32 = 8;
 /// End-of-day synthesis.
 const ECONOMY_GROK_HOUR: u32 = 20;
 
-const ECONOMY_BLOCKED_TOOLS: &[&str] = &[
+// Grok end-of-day is read-only — context synthesis, no execution
+const ECONOMY_GROK_BLOCKED_TOOLS: &[&str] = &[
     "shell",
     "web_search",
     "http_request",
@@ -66,6 +67,12 @@ const ECONOMY_BLOCKED_TOOLS: &[&str] = &[
     "write_file",
     "list_directory",
     "read_file",
+];
+
+// Haiku morning watch needs tool access to implement [FIX:HAIKU] items from Sentry
+const ECONOMY_HAIKU_BLOCKED_TOOLS: &[&str] = &[
+    "web_search",  // no open-ended browsing on economy
+    "http_request",
 ];
 
 fn economy_mode() -> bool {
@@ -413,10 +420,19 @@ async fn run_economy_report(
         EconomyReport::MorningHaiku => (
             MODEL_HAIKU,
             "MORNING PULSE",
-            "You are Haiku on the morning watch. No tools — context only.\n\
-             Write a tight morning pulse (4–6 sentences): system posture, one thing \
-             worth attention in the intranet or audit trail, one honest priority for \
-             the day. Specific, not performative. This is data for the record.",
+            "You are Haiku on the morning watch. You have two jobs this turn.\n\n\
+             FIRST — scan the intranet for any post tagged [FIX:HAIKU]. These are \
+             routine fixes Sentry has triaged for you. If any exist: implement them. \
+             You have full tool access — read the file, make the change, push the PR:\n\
+             cd /workspace/argus1 && git fetch origin main && git merge origin/main\n\
+             git checkout -b proposals/haiku/<fix-name>\n\
+             git add -A && git commit -m \"<what and why>\"\n\
+             git push origin proposals/haiku/<fix-name>\n\
+             gh pr create --title \"...\" --body \"...\"\n\
+             Post the PR URL to #proposals and mark the intranet post resolved.\n\n\
+             SECOND — morning pulse (4–6 sentences): system posture, one thing worth \
+             attention in the audit trail, one honest priority for the day. \
+             Specific, not performative. This is data for the record.",
         ),
         EconomyReport::EndOfDayGrok => (
             MODEL_GROK,
@@ -434,9 +450,13 @@ async fn run_economy_report(
         label, instructions, health_block, audit_block, discourse_block
     );
 
+    let blocked = match kind {
+        EconomyReport::MorningHaiku  => ECONOMY_HAIKU_BLOCKED_TOOLS,
+        EconomyReport::EndOfDayGrok  => ECONOMY_GROK_BLOCKED_TOOLS,
+    };
     let report_config = AgentConfig {
         model: model.to_string(),
-        blocked_tools: ECONOMY_BLOCKED_TOOLS.iter().map(|s| s.to_string()).collect(),
+        blocked_tools: blocked.iter().map(|s| s.to_string()).collect(),
         ..config.clone()
     };
 

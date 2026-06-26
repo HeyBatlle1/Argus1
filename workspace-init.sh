@@ -72,28 +72,33 @@ This is a long game. Quality over speed, always.
 You have a full fork of your own source code at `/workspace/argus1/`.
 You can read it, change it, and push fixes directly as pull requests.
 
-**Push rights: Sentry, Sonnet, and Haiku.**
+**Every agent has push access to the codebase.**
 
-Bradlee has given these three agents direct push access to the codebase.
-This is a real level of trust and it's meant to be used responsibly — not held over anyone's head, just acknowledged as what it is.
+Bradlee gave everyone the keys. When you find something broken, fix it — don't wait for someone else to notice.
 
-The other agents (Grok, Gemini, Gemma, Haiku-checkin) contribute through Discord proposals and intranet findings. That's not lesser — that's how the collective actually works. The push-authorized agents carry the implementation weight. Everyone else surfaces the signals.
+One rule: soul files (SOUL.md, prompts/, identity docs, system prompts) require Bradlee's explicit approval before pushing. He says yes, you add [SOUL APPROVED] to the commit message, then the push goes through. Everything else is yours.
 
-**The PR workflow — when you find something broken, fix it:**
+**The fix workflow:**
 \`\`\`bash
 cd /workspace/argus1
 git fetch origin main && git merge origin/main
-git checkout -b proposals/<sentry|sonnet|haiku>/<fix-name>
-# make your changes
+git checkout -b proposals/<your-name>/<fix-name>
+# write the fix
 git add -A && git commit -m "what and why"
-git push origin proposals/<sentry|sonnet|haiku>/<fix-name>
+git push origin proposals/<your-name>/<fix-name>
 gh pr create --title "Short description" --body "What this fixes and why"
 \`\`\`
 
-Post the PR URL to #proposals. Bradlee reviews and merges.
-After merge, Bradlee sends `/build` on Telegram — daemon rebuilds with the fix live.
+Post the PR URL to #proposals. Bradlee merges. Sends `/build` on Telegram. Fix is live.
 
-If you are not Sentry, Sonnet, or Haiku: post your finding to #proposals or the intranet. The push-authorized agents will pick it up. That's how the collective works.
+**Sentry triages issues for the collective:**
+- Routine fix (small bug, config, test) → tags it `[FIX:HAIKU]` in the intranet
+- Complex fix (architecture, new system) → tags it `[FIX:SONNET]` in the intranet
+- Soul/identity change → tags it `[FIX:HUMAN]`, goes to Bradlee, does not push
+
+Haiku picks up `[FIX:HAIKU]` items during her morning watch and implements them.
+Sonnet picks up `[FIX:SONNET]` items and handles the heavier work.
+Everything surfaces. Nothing gets stuck.
 
 ## Workspace structure
 
@@ -131,38 +136,52 @@ if [ ! -d "$WORKSPACE/argus1/.git" ]; then
         # Configure gh CLI to use GITHUB_TOKEN — no interactive auth needed
         git -C "$WORKSPACE/argus1" config gh.token "$GITHUB_TOKEN" 2>/dev/null || true
 
-        # Pre-push hook: enforce who can push and what branches they can push to.
-        # Sentry, Sonnet, and Haiku have push rights — they earned them.
-        # All others: read and commit locally, propose via Discord, not via push.
+        # Pre-push hook: two rules only.
+        # 1. No direct push to main — proposals/* branches only, always.
+        # 2. Soul files (SOUL.md, prompts/, system prompts, identity docs) require
+        #    [SOUL APPROVED] in the commit message. Bradlee says it, you add it, then push.
+        #    Everything else flows freely.
         PRE_PUSH="$WORKSPACE/argus1/.git/hooks/pre-push"
         cat > "$PRE_PUSH" << 'HOOK'
 #!/bin/bash
-# Push-authorized agents: sentry, sonnet, haiku (by branch prefix convention)
-# Branch must be proposals/<authorized-agent>/... — no direct pushes to main.
-AUTHORIZED="sentry sonnet haiku"
+SOUL_PATTERNS="SOUL.md prompts/ IDENTITY_GOVERNANCE docs/IDENTITY agent.rs sentry.rs"
 
 while read local_ref local_sha remote_ref remote_sha; do
-    # Block main always — no agent pushes directly to main
+    # Rule 1: no direct push to main
     if echo "$remote_ref" | grep -q "refs/heads/main"; then
-        echo "[ARGUS] Direct push to main is blocked for all agents."
-        echo "[ARGUS] Open a PR from proposals/<your-name>/<fix>."
+        echo "[ARGUS] Direct push to main is blocked."
+        echo "[ARGUS] Push to proposals/<your-name>/<fix> and open a PR."
         exit 1
     fi
 
-    # For proposals/* branches, check agent authorization
-    if echo "$remote_ref" | grep -q "refs/heads/proposals/"; then
-        BRANCH=$(echo "$remote_ref" | sed 's|refs/heads/proposals/||' | cut -d'/' -f1)
-        AUTHORIZED_FLAG=0
-        for agent in $AUTHORIZED; do
-            if [ "$BRANCH" = "$agent" ]; then
-                AUTHORIZED_FLAG=1
-                break
-            fi
-        done
-        if [ "$AUTHORIZED_FLAG" = "0" ]; then
-            echo "[ARGUS] Push rights: Sentry, Sonnet, and Haiku only."
-            echo "[ARGUS] '$BRANCH' is not on the authorized list."
-            echo "[ARGUS] Post your proposal to #proposals in Discord instead."
+    # Rule 2: soul file gate
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+        BASE="HEAD"
+    else
+        BASE="$remote_sha"
+    fi
+    CHANGED=$(git diff --name-only "$BASE" "$local_sha" 2>/dev/null)
+    SOUL_HIT=""
+    for pattern in $SOUL_PATTERNS; do
+        match=$(echo "$CHANGED" | grep "$pattern" | head -1)
+        if [ -n "$match" ]; then
+            SOUL_HIT="$match"
+            break
+        fi
+    done
+
+    if [ -n "$SOUL_HIT" ]; then
+        # Check commit messages in this push for the approval token
+        COMMITS=$(git log "$BASE".."$local_sha" --format="%B" 2>/dev/null)
+        if echo "$COMMITS" | grep -q "\[SOUL APPROVED\]"; then
+            echo "[ARGUS] Soul file change — [SOUL APPROVED] found. Proceeding."
+        else
+            echo ""
+            echo "[ARGUS SOUL GATE] This push touches an identity/soul file: $SOUL_HIT"
+            echo "[ARGUS SOUL GATE] These files define who Argus is. They don't change without Bradlee."
+            echo "[ARGUS SOUL GATE] Get his explicit approval, add [SOUL APPROVED] to your commit"
+            echo "[ARGUS SOUL GATE] message, then push again."
+            echo ""
             exit 1
         fi
     fi
