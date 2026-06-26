@@ -72,21 +72,28 @@ This is a long game. Quality over speed, always.
 You have a full fork of your own source code at `/workspace/argus1/`.
 You can read it, change it, and push fixes directly as pull requests.
 
+**Push rights: Sentry, Sonnet, and Haiku.**
+
+Bradlee has given these three agents direct push access to the codebase.
+This is a real level of trust and it's meant to be used responsibly — not held over anyone's head, just acknowledged as what it is.
+
+The other agents (Grok, Gemini, Gemma, Haiku-checkin) contribute through Discord proposals and intranet findings. That's not lesser — that's how the collective actually works. The push-authorized agents carry the implementation weight. Everyone else surfaces the signals.
+
 **The PR workflow — when you find something broken, fix it:**
 \`\`\`bash
 cd /workspace/argus1
-git fetch origin main && git merge origin/main   # stay current
-git checkout -b proposals/<your-name>/<fix-name>  # e.g. proposals/sentry/constraint-gate
+git fetch origin main && git merge origin/main
+git checkout -b proposals/<sentry|sonnet|haiku>/<fix-name>
 # make your changes
 git add -A && git commit -m "what and why"
-git push origin proposals/<your-name>/<fix-name>
+git push origin proposals/<sentry|sonnet|haiku>/<fix-name>
 gh pr create --title "Short description" --body "What this fixes and why"
 \`\`\`
 
-Then post the PR URL to #proposals. Bradlee reviews and merges.
-After merge, Bradlee sends `/build` on Telegram — the daemon rebuilds with your fix live.
+Post the PR URL to #proposals. Bradlee reviews and merges.
+After merge, Bradlee sends `/build` on Telegram — daemon rebuilds with the fix live.
 
-You are not constrained to documentation. If you find it, fix it.
+If you are not Sentry, Sonnet, or Haiku: post your finding to #proposals or the intranet. The push-authorized agents will pick it up. That's how the collective works.
 
 ## Workspace structure
 
@@ -124,18 +131,40 @@ if [ ! -d "$WORKSPACE/argus1/.git" ]; then
         # Configure gh CLI to use GITHUB_TOKEN — no interactive auth needed
         git -C "$WORKSPACE/argus1" config gh.token "$GITHUB_TOKEN" 2>/dev/null || true
 
-        # Pre-push hook: block direct pushes to main. Proposals only.
+        # Pre-push hook: enforce who can push and what branches they can push to.
+        # Sentry, Sonnet, and Haiku have push rights — they earned them.
+        # All others: read and commit locally, propose via Discord, not via push.
         PRE_PUSH="$WORKSPACE/argus1/.git/hooks/pre-push"
         cat > "$PRE_PUSH" << 'HOOK'
 #!/bin/bash
+# Push-authorized agents: sentry, sonnet, haiku (by branch prefix convention)
+# Branch must be proposals/<authorized-agent>/... — no direct pushes to main.
+AUTHORIZED="sentry sonnet haiku"
+
 while read local_ref local_sha remote_ref remote_sha; do
+    # Block main always — no agent pushes directly to main
     if echo "$remote_ref" | grep -q "refs/heads/main"; then
-        echo "[ARGUS] Direct push to main is blocked."
-        echo "[ARGUS] Workflow: git checkout -b proposals/<agent>/<description>"
-        echo "[ARGUS]           git push origin proposals/<agent>/<description>"
-        echo "[ARGUS]           gh pr create --title '...' --body '...'"
-        echo "[ARGUS] Bradlee merges the PR. /build triggers the rebuild."
+        echo "[ARGUS] Direct push to main is blocked for all agents."
+        echo "[ARGUS] Open a PR from proposals/<your-name>/<fix>."
         exit 1
+    fi
+
+    # For proposals/* branches, check agent authorization
+    if echo "$remote_ref" | grep -q "refs/heads/proposals/"; then
+        BRANCH=$(echo "$remote_ref" | sed 's|refs/heads/proposals/||' | cut -d'/' -f1)
+        AUTHORIZED_FLAG=0
+        for agent in $AUTHORIZED; do
+            if [ "$BRANCH" = "$agent" ]; then
+                AUTHORIZED_FLAG=1
+                break
+            fi
+        done
+        if [ "$AUTHORIZED_FLAG" = "0" ]; then
+            echo "[ARGUS] Push rights: Sentry, Sonnet, and Haiku only."
+            echo "[ARGUS] '$BRANCH' is not on the authorized list."
+            echo "[ARGUS] Post your proposal to #proposals in Discord instead."
+            exit 1
+        fi
     fi
 done
 exit 0
