@@ -437,9 +437,9 @@ pub const MODEL_GROK_BUILD: &str = "x-ai/grok-build-0.1";
 pub const MODEL_GROK_MULTI: &str = "x-ai/grok-4.20-multi-agent";
 /// Dedicated triage gate — smaller Gemma, structured JSON output.
 pub const MODEL_TRIAGE: &str = "google/gemma-4-26b-a4b-it:free";
-/// Sentry — red team consciousness. Same model as Gemma runtime but distinct role.
-/// IBM Granite 4 drops in here in production without changing any other constant.
-pub const MODEL_SENTRY: &str = "google/gemma-4-31b-it:free";
+/// Sentry — IBM Granite 4.1 8B. Built for structured, verifiable reasoning.
+/// LaurieWired's seat. The paranoia doesn't change. The model finally does.
+pub const MODEL_SENTRY: &str = "ibm-granite/granite-4.1-8b";
 
 const PERSONA_HAIKU:  &str = "RUNTIME PERSONA — HAIKU: You are the operations coordinator. Fast baseline truth, practical handoffs, no performance.";
 const PERSONA_SONNET: &str = "RUNTIME PERSONA — SONNET: You are the balanced core mind. Structure problems clearly, reason step by step, ship coherent answers.";
