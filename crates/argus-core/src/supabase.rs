@@ -326,7 +326,7 @@ impl SupabaseClient {
             "created_by": "argus-sentry",
         });
         let resp = self.client
-            .post(&self.rest_url("argus_active_constraints"))
+            .post(&format!("{}?on_conflict=constraint_name", self.rest_url("argus_active_constraints")))
             .header("Authorization", format!("Bearer {}", self.jwt))
             .header("apikey", &self.jwt)
             .header("Content-Type", "application/json")
