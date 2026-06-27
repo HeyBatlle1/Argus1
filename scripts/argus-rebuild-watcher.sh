@@ -12,6 +12,9 @@ ENV_CACHE="$HOME/.argus/.env.cache"
 COMPOSE_FILE="$HOME/Argus1/docker-compose.yml"
 LOG="$HOME/.argus/rebuild-watcher.log"
 
+# launchd runs with a stripped PATH — set it explicitly
+export PATH="/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:$PATH"
+
 [ -f "$TRIGGER" ] || exit 0
 
 REQUESTER=$(cat "$TRIGGER" 2>/dev/null || echo "unknown")
