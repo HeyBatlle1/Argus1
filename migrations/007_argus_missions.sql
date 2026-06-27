@@ -27,5 +27,8 @@ CREATE INDEX IF NOT EXISTS idx_argus_missions_created
 -- RLS: service role only — agents write via the daemon's service key
 ALTER TABLE argus_missions ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "service_role_all" ON argus_missions
-    FOR ALL TO service_role USING (true) WITH CHECK (true);
+DO $$ BEGIN
+    CREATE POLICY "service_role_all" ON argus_missions
+        FOR ALL TO service_role USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
